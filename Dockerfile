@@ -1,4 +1,4 @@
-FROM golang:1.14 as builder
+FROM golang:1.24 AS builder
 WORKDIR /go/src/github.com/akamai/akamai-gtm-metrics-exporter
 COPY . .
 RUN make build

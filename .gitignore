@@ -1,0 +1,19 @@
+# --- Project specific binaries ---
+akamai-gtm-metrics-exporter
+akamai-gtm-metrics-traffic-exporter
+akamai-gtm-metrics-*
+
+# --- macOS specific ---
+.DS_Store
+
+# --- IDEs ---
+.vscode/
+
+# --- Akamai & Environment ---
+.edgerc
+*.env
+.env.*
+
+prometheus.yml
+vendor/
+build/

@@ -34,11 +34,11 @@ GOHOSTARCH   ?= $(shell $(GO) env GOHOSTARCH)
 
 GO_VERSION        ?= $(shell $(GO) version)
 GO_VERSION_NUMBER ?= $(word 3, $(GO_VERSION))
-PRE_GO_111        ?= $(shell echo $(GO_VERSION_NUMBER) | grep -E 'go1\.(10|[0-9])\.')
+PRE_GO_124        ?= $(shell echo $(GO_VERSION_NUMBER) | grep -E 'go1\.(2[0-3]|[0-9])\.')
 
 GOVENDOR :=
 GO111MODULE :=
-ifeq (, $(PRE_GO_111))
+ifeq (, $(PRE_GO_124))
 	ifneq (,$(wildcard go.mod))
 		# Enforce Go modules support just in case the directory is inside GOPATH (and for Travis CI).
 		GO111MODULE := on
@@ -51,7 +51,7 @@ ifeq (, $(PRE_GO_111))
 else
 	ifneq (,$(wildcard go.mod))
 		ifneq (,$(wildcard vendor))
-$(warning This repository requires Go >= 1.11 because of Go modules)
+$(warning This repository requires Go >= 1.24 because of Go modules)
 $(warning Some recipes may not work as expected as the current Go runtime is '$(GO_VERSION_NUMBER)')
 		endif
 	else
@@ -65,6 +65,8 @@ pkgs          = ./...
 ifeq (arm, $(GOHOSTARCH))
 	GOHOSTARM ?= $(shell GOARM= $(GO) env GOARM)
 	GO_BUILD_PLATFORM ?= $(GOHOSTOS)-$(GOHOSTARCH)v$(GOHOSTARM)
+else ifeq (arm64, $(GOHOSTARCH))
+	GO_BUILD_PLATFORM ?= $(GOHOSTOS)-$(GOHOSTARCH)
 else
 	GO_BUILD_PLATFORM ?= $(GOHOSTOS)-$(GOHOSTARCH)
 endif
@@ -78,16 +80,15 @@ ifneq ($(shell which gotestsum),)
 endif
 endif
 
-PROMU_VERSION ?= 0.7.0
+PROMU_VERSION ?= 0.17.0
 PROMU_URL     := https://github.com/prometheus/promu/releases/download/v$(PROMU_VERSION)/promu-$(PROMU_VERSION).$(GO_BUILD_PLATFORM).tar.gz
 
 GOLANGCI_LINT :=
 GOLANGCI_LINT_OPTS ?=
-GOLANGCI_LINT_VERSION ?= v1.18.0
-# golangci-lint only supports linux, darwin and windows platforms on i386/amd64.
+GOLANGCI_LINT_VERSION ?= v2.8.0
 # windows isn't included here because of the path separator being different.
 ifeq ($(GOHOSTOS),$(filter $(GOHOSTOS),linux darwin))
-	ifeq ($(GOHOSTARCH),$(filter $(GOHOSTARCH),amd64 i386))
+	ifeq ($(GOHOSTARCH),$(filter $(GOHOSTARCH),amd64 i386 arm64))
 		GOLANGCI_LINT := $(FIRST_GOPATH)/bin/golangci-lint
 	endif
 endif
@@ -99,15 +100,14 @@ DOCKERFILE_PATH         ?= ./Dockerfile
 DOCKERBUILD_CONTEXT     ?= ./
 DOCKER_REPO             ?= prom
 
-DOCKER_ARCHS            ?= amd64
+DOCKER_ARCHS            ?= amd64 arm64
 
 BUILD_DOCKER_ARCHS = $(addprefix common-docker-,$(DOCKER_ARCHS))
 PUBLISH_DOCKER_ARCHS = $(addprefix common-docker-publish-,$(DOCKER_ARCHS))
 TAG_DOCKER_ARCHS = $(addprefix common-docker-tag-latest-,$(DOCKER_ARCHS))
 
-ifeq ($(GOHOSTARCH),amd64)
+ifeq ($(GOHOSTARCH),$(filter $(GOHOSTARCH),amd64 arm64))
         ifeq ($(GOHOSTOS),$(filter $(GOHOSTOS),linux freebsd darwin windows))
-                # Only supported on amd64
                 test-flags := -race
         endif
 endif

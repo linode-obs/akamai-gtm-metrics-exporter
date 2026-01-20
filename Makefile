@@ -15,10 +15,10 @@
 all::
 
 # Needs to be defined before including Makefile.common to auto-generate targets
-DOCKER_ARCHS ?= amd64 # armv7 arm64 ppc64le s390x
+DOCKER_ARCHS ?= amd64 arm64 # armv7 ppc64le s390x
 DOCKER_REPO ?= akamai
 
-PROMTOOL_VERSION ?= 2.18.1
+PROMTOOL_VERSION ?= 3.9.1
 PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
 PROMTOOL         ?= $(FIRST_GOPATH)/bin/promtool
 
@@ -59,6 +59,7 @@ PROMU := $(FIRST_GOPATH)/bin/promu --config $(PROMU_CONF)
 
 # By default, "cross" test with ourselves to cover unknown pairings.
 $(eval $(call goarch_pair,amd64,386))
+$(eval $(call goarch_pair,arm64,armv7))
 $(eval $(call goarch_pair,mips64,mips))
 $(eval $(call goarch_pair,mips64el,mipsel))
 
@@ -70,5 +71,6 @@ all:: precheck style check_license lint build
 promtool: $(PROMTOOL)
 
 $(PROMTOOL):
+	@echo ">> downloading promtool v$(PROMTOOL_VERSION)"
 	mkdir -p $(FIRST_GOPATH)/bin
 	curl -fsS -L $(PROMTOOL_URL) | tar -xvzf - -C $(FIRST_GOPATH)/bin --no-anchored --strip 1 promtool

@@ -14,24 +14,29 @@
 package main
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/log"
-	"github.com/prometheus/common/version"
-
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
-
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/edgegrid"
-	collectors "github.com/akamai/akamai-gtm-metrics-exporter/collectors"
-	"gopkg.in/yaml.v2"
-
+	"context"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	promcollectors "github.com/prometheus/client_golang/prometheus/collectors"
+	buildversion "github.com/prometheus/client_golang/prometheus/collectors/version"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/version"
+	"github.com/sirupsen/logrus" // Better leveled logging
+
+	kingpin "github.com/alecthomas/kingpin/v2"
+
+	// Akamai v12 Packages
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
+
+	"github.com/akamai/akamai-gtm-metrics-exporter/collectors"
+	yaml "gopkg.in/yaml.v3"
 )
 
 const (
@@ -50,6 +55,7 @@ var (
 	edgegridClientSecret = kingpin.Flag("gtm.edgegrid-client-secret", "The Akamai Edgegrid client_secret credential.").String()
 	edgegridClientToken  = kingpin.Flag("gtm.edgegrid-client-token", "The Akamai Edgegrid client_token credential.").String()
 	edgegridAccessToken  = kingpin.Flag("gtm.edgegrid-access-token", "The Akamai Edgegrid access_token credential.").String()
+	logLevel             = kingpin.Flag("log.level", "Set the logging level (debug, info, warn, error)").Default("info").String()
 
 	// invalidMetricChars    = regexp.MustCompile("[^a-zA-Z0-9_:]")
 	lookbackDuration = lookbackDefaultDuration
@@ -61,31 +67,38 @@ var (
 // 2. Edgerc path
 // 3. Environment
 // 4. Default
-func initAkamaiConfig(gtmMetricsConfig collectors.GTMMetricsConfig) error {
+// initAkamaiSession creates a v12 session based on CLI flags or Edgerc
+func initAkamaiSession(gtmMetricsConfig collectors.GTMMetricsConfig) (session.Session, error) {
+	var config *edgegrid.Config
+	var err error
 
+	// 1. Check Command Line Flags
 	if *edgegridHost != "" && *edgegridClientSecret != "" && *edgegridClientToken != "" && *edgegridAccessToken != "" {
-		edgeconf := edgegrid.Config{}
-		edgeconf.Host = *edgegridHost
-		edgeconf.ClientToken = *edgegridClientToken
-		edgeconf.ClientSecret = *edgegridClientSecret
-		edgeconf.AccessToken = *edgegridAccessToken
-		edgeconf.MaxBody = 131072
-		return collectors.EdgeInit(edgeconf)
-	} else if *edgegridHost != "" || *edgegridClientSecret != "" || *edgegridClientToken != "" || *edgegridAccessToken != "" {
-		log.Warnf("Command line Auth Keys are incomplete. Looking for alternate definitions.")
+		config = &edgegrid.Config{
+			Host:         *edgegridHost,
+			ClientToken:  *edgegridClientToken,
+			ClientSecret: *edgegridClientSecret,
+			AccessToken:  *edgegridAccessToken,
+		}
+	} else {
+		// 2. Check Edgerc Path (v12 style)
+		config, err = edgegrid.New(
+			edgegrid.WithFile(gtmMetricsConfig.EdgercPath),
+			edgegrid.WithSection(gtmMetricsConfig.EdgercSection),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error loading edgerc: %w", err)
+		}
 	}
 
-	// Edgegrid will also check for environment variables ...
-	err := collectors.EdgegridInit(gtmMetricsConfig.EdgercPath, gtmMetricsConfig.EdgercSection)
+	// Create the v12 session
+	sess, err := session.New(session.WithSigner(config), session.WithHTTPTracing(false))
 	if err != nil {
-		log.Fatalf("Error initializing Akamai Edgegrid config: %s", err.Error())
-		return err
+		return nil, fmt.Errorf("error creating session: %w", err)
+
 	}
 
-	log.Debugf("Edgegrid config: [%v]", collectors.EdgegridConfig)
-
-	return nil
-
+	return sess, nil
 }
 
 // Calculate window duration based on config and save in lookbackDuration global variable
@@ -95,7 +108,7 @@ func calcWindowDuration(window string) (time.Duration, error) {
 	var err error
 	var multiplier time.Duration = time.Hour * time.Duration(HoursInDay) // assume days
 
-	log.Debugf("Window: %s", window)
+	logrus.Debugf("Window: %s", window)
 	if window == "" {
 		return time.Second * 0, fmt.Errorf("Summary window not set")
 	}
@@ -116,99 +129,124 @@ func calcWindowDuration(window string) (time.Duration, error) {
 		}
 	}
 	if err != nil {
-		log.Warnf("ERROR: %s", err.Error())
+		logrus.Warnf("ERROR: %s", err.Error())
 		return time.Second * 0, err
 	}
-	log.Debugf("multiplier: [%v} units: [%v]", multiplier, datawin)
+	logrus.Debugf("multiplier: [%v} units: [%v]", multiplier, datawin)
 	return multiplier * time.Duration(datawin), nil
 
 }
 
-func main() {
+func setupLogging(level string) {
+	lvl, err := logrus.ParseLevel(level)
+	if err != nil {
+		logrus.Fatalf("Invalid log level: %v", err)
+	}
+	logrus.SetLevel(lvl)
+	logrus.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
+	})
+}
 
-	log.AddFlags(kingpin.CommandLine)
+func main() {
 	kingpin.Version(version.Print(namespace + "metrics_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
-	log.Infof("Config file: %s", *configFile)
-	log.Infof("Starting GTM Metrics exporter. %s", version.Info())
-	log.Infof("Build context: %s", version.BuildContext())
+	setupLogging(*logLevel)
 
-	gtmMetricsConfig, err := loadConfig(*configFile) // save?
+	logrus.Infof("Config file: %s", *configFile)
+	logrus.Infof("Starting GTM Metrics exporter %s", version.Info())
+	logrus.Infof("Build context: %s", version.BuildContext())
+
+	gtmMetricsConfig, err := loadConfig(*configFile)
 	if err != nil {
-		log.Fatalf("Error loading akamai_gtm_metrics_exporter config file: %v", err)
+		logrus.Fatalf("Error loading config: %v", err)
+	}
+	logrus.Debugf("Exporter configuration: [%v]", gtmMetricsConfig)
+
+	// Initialize v12 Session
+	akamaiSession, err := initAkamaiSession(gtmMetricsConfig)
+	if err != nil {
+		logrus.Fatalf("Error initializing Akamai session: %v", err)
 	}
 
-	log.Debugf("Exporter configuration: [%v]", gtmMetricsConfig)
+	ctx := context.Background()
 
-	// Initalize Akamai Edgegrid ...
-	err = initAkamaiConfig(gtmMetricsConfig)
-	if err != nil {
-		log.Fatalf("Error initializing Akamai Edgegrid config: %s", err.Error())
-	}
-
+	// Time window calculations
 	tstart := time.Now().UTC().Add(-1 * prefillDuration) // assume start time is Exporter launch less default prefill
 	if gtmMetricsConfig.SummaryWindow != "" {
 		lookbackDuration, err = calcWindowDuration(gtmMetricsConfig.SummaryWindow)
 		if err != nil {
-			log.Warnf("Summary Retention window is not valid. Using default")
+			logrus.Warnf("Summary Retention window is not valid. Using default")
 		}
 	} else {
-		log.Warnf("Summary Retention window is not configured. Using default")
+		logrus.Warnf("Summary Retention window is not configured. Using default")
 	}
 	if gtmMetricsConfig.PreFillWindow != "" {
 		prefillDuration, err = calcWindowDuration(gtmMetricsConfig.PreFillWindow)
 		if err == nil {
 			tstart = time.Now().UTC().Add(prefillDuration * -1)
 		} else {
-			log.Warnf("Prefill window is not valid. Using default")
+			logrus.Warnf("Prefill window is not valid. Using default")
 		}
 	} else {
-		log.Warnf("Prefill window is not configured. Using default")
+		logrus.Warnf("Prefill window is not configured. Using default")
 	}
 
-	log.Infof("GTM Metrics exporter start time: %v", tstart)
+	logrus.Infof("GTM Metrics exporter lookback: %v, start time: %v", lookbackDuration, tstart)
 
-	// Use custom registry
+	// Create Prometheus Registry
 	r := prometheus.NewRegistry()
-	r.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
-	r.MustRegister(prometheus.NewGoCollector())
-	r.MustRegister(version.NewCollector(namespace + "metrics_exporter"))
-	r.MustRegister(collectors.NewDatacenterTrafficCollector(r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
-	r.MustRegister(collectors.NewPropertyTrafficCollector(r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
-	r.MustRegister(collectors.NewLivenessTrafficCollector(r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
+	r.MustRegister(
+		// Use 'promcollectors' alias
+		promcollectors.NewProcessCollector(promcollectors.ProcessCollectorOpts{}),
+		promcollectors.NewGoCollector(),
 
+		// Use 'buildversion' alias
+		buildversion.NewCollector(namespace+"metrics_exporter"),
+	)
+
+	// If you want to print the version to the console on startup:
+	logrus.Infof("Starting exporter %s", version.Info())
+
+	// Register the various GTM collectors
+	// We pass the session and the shared registry/config to each
+	r.MustRegister(collectors.NewDatacenterTrafficCollector(ctx, akamaiSession, r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
+	r.MustRegister(collectors.NewPropertyTrafficCollector(ctx, akamaiSession, r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
+	r.MustRegister(collectors.NewLivenessTrafficCollector(ctx, akamaiSession, r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
+
+	// Define HTTP handlers
 	http.Handle("/metrics", promhttp.HandlerFor(r, promhttp.HandlerOpts{Registry: r}))
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html>
-			<head><title>akamai_gtm_metrics_exporter</title></head>
-			<body>
-			<h1>akamai_gtm_metrics_exporter</h1>
-			<p><a href="/metrics">Metrics</a></p>
-			</body>
-			</html>`))
+            <head><title>akamai_gtm_metrics_exporter</title></head>
+            <body>
+            <h1>akamai_gtm_metrics_exporter</h1>
+            <p><a href="/metrics">Metrics</a></p>
+            </body>
+            </html>`))
 	})
 
-	log.Info("Beginning to serve on address ", *listenAddress)
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
-
+	logrus.Infof("Beginning to serve on address %s", *listenAddress)
+	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
+		logrus.Fatalf("Error starting HTTP server: %v", err)
+	}
 }
 
 func loadConfig(configFile string) (collectors.GTMMetricsConfig, error) {
 	if fileExists(configFile) {
-		// Load config from file
-		configData, err := ioutil.ReadFile(configFile)
+		// Use os.ReadFile instead of ioutil.ReadFile
+		configData, err := os.ReadFile(configFile)
 		if err != nil {
 			return collectors.GTMMetricsConfig{}, err
 		}
-		log.Debugf("GTM metrics config file: %s", string(configData))
+		logrus.Debugf("GTM metrics config file: %s", string(configData))
 		return loadConfigContent(configData)
 	}
 
-	log.Infof("Config file %v does not exist, using default values", configFile)
+	logrus.Infof("Config file %v does not exist, using default values", configFile)
 	return collectors.GTMMetricsConfig{}, nil
-
 }
 
 func loadConfigContent(configData []byte) (collectors.GTMMetricsConfig, error) {
@@ -220,7 +258,7 @@ func loadConfigContent(configData []byte) (collectors.GTMMetricsConfig, error) {
 		return config, err
 	}
 
-	log.Info("akamai_gtm_metrics_exporter config loaded")
+	logrus.Info("akamai_gtm_metrics_exporter config loaded")
 	return config, nil
 }
 
