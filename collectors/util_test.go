@@ -17,17 +17,13 @@ import (
 	"fmt"
 	"testing"
 
-	// Akamai v12 Packages
 	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
 	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
-
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/h2non/gock.v1"
 )
 
-// Helper function to create a v12 session for testing
 func mockV12Session() session.Session {
-	// In v12, manually specify the struct fields for hardcoded test configs
 	config := &edgegrid.Config{
 		Host:         "akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net",
 		ClientToken:  "akab-client-token-xxx-xxxxxxxxxxxxxxxx",
@@ -48,11 +44,9 @@ func TestGetTrafficReport(t *testing.T) {
 	dnsTestProperty := "testprop"
 	queryargs := map[string]string{"date": "2016/11/23"}
 
-	// 1. Get the v12 session
 	sess := mockV12Session()
 
 	defer gock.Off()
-	// 2. Simplify gock URL matching (match base + path separately for clarity)
 	mock := gock.New("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net")
 	mock.
 		Get(fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", dnsTestDomain, dnsTestProperty)).
@@ -80,7 +74,6 @@ func TestGetTrafficReport(t *testing.T) {
                 } ]
         }`)
 
-	// 3. Call with session as the first argument
 	report, err := GetLivenessErrorsReport(sess, dnsTestDomain, dnsTestProperty, queryargs)
 
 	assert.NoError(t, err)
@@ -93,7 +86,6 @@ func TestGetTrafficReport_BadArg(t *testing.T) {
 	dnsTestProperty := "testprop"
 	queryargs := map[string]string{"date": "2016/11/23"}
 
-	// 1. Get the v12 session
 	sess := mockV12Session()
 
 	defer gock.Off()
@@ -103,7 +95,6 @@ func TestGetTrafficReport_BadArg(t *testing.T) {
 		Reply(500).
 		BodyString(`Server Error`)
 
-	// 2. Call with session
 	_, err := GetLivenessErrorsReport(sess, dnsTestDomain, dnsTestProperty, queryargs)
 
 	assert.Error(t, err)

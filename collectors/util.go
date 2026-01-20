@@ -158,7 +158,6 @@ func NewSession(edgercpath, section string) (session.Session, error) {
 	return sess, nil
 }
 
-// GetLivenessErrorsReport refactored for v12 Session with original logic parity
 func GetLivenessErrorsReport(sess session.Session, domainName, propertyName string, queryArgs map[string]string) (*LivenessErrorsResponse, error) {
 	path := fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", domainName, propertyName)
 
@@ -168,12 +167,12 @@ func GetLivenessErrorsReport(sess session.Session, domainName, propertyName stri
 		return nil, err
 	}
 
-	// 2. Original Logic: Mandatory Date check
+	// 2. Mandatory Date check
 	if _, ok := queryArgs["date"]; !ok {
 		return nil, fmt.Errorf("GetLivenessErrorsReport: date parameter is required")
 	}
 
-	// 3. Original Logic: Specific Query Parameter filtering
+	// 3. Specific Query Parameter filtering
 	q := req.URL.Query()
 	for k, v := range queryArgs {
 		switch k {
@@ -183,20 +182,15 @@ func GetLivenessErrorsReport(sess session.Session, domainName, propertyName stri
 	}
 	req.URL.RawQuery = q.Encode()
 
-	// 4. Original Requirement: Content-Type header
-	// Even for GETs, the original code explicitly required this for timestamp processing
+	// 4. Content-Type header
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	// 5. Execute using v12 Session
+	// 5. Execute using Session
 	var result LivenessErrorsResponse
 	resp, err := sess.Exec(req, &result)
 
-	// 6. Detailed Error Handling mimicking the original client.Do logic
 	if err != nil {
-		// If it's a 404, we handle it specifically like the original code
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			// Note: If you have configgtm imported, you can return cErr.
-			// Otherwise, a formatted error is best for v12.
 			return nil, fmt.Errorf("liveness report not found (404) for property: %s", propertyName)
 		}
 		return nil, fmt.Errorf("API request failed: %w", err)
@@ -208,8 +202,6 @@ func GetLivenessErrorsReport(sess session.Session, domainName, propertyName stri
 
 	return &result, nil
 }
-
-// --- Utility Functions (Cleaned up) ---
 
 func convertTimeFormat(src time.Time, format string) (string, error) {
 	t := src.UTC().Format(time.RFC3339)
@@ -241,7 +233,6 @@ func parseTimeString(srctime, format string) (time.Time, error) {
 	return ts, err
 }
 
-// Update the sorting helpers to use these local types
 func sortDCDataRowsByTimestamp(drs []*DatacenterTrafficData) {
 	sort.Slice(drs, func(i, j int) bool {
 		return drs[i].Timestamp < drs[j].Timestamp

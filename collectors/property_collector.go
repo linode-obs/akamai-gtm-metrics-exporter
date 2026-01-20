@@ -21,9 +21,7 @@ import (
 	"strings"
 	"time"
 
-	// Akamai v12 Package
 	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 )
@@ -36,9 +34,9 @@ type GTMPropertyTrafficExporter struct {
 	GTMConfig                GTMMetricsConfig
 	PropertyMetricPrefix     string
 	PropertyLookbackDuration time.Duration
-	LastTimestamp            map[string]map[string]time.Time // index by domain, property
+	LastTimestamp            map[string]map[string]time.Time
 	PropertyRegistry         *prometheus.Registry
-	AkamaiSession            session.Session // v12 Authenticated Session
+	AkamaiSession            session.Session
 	ctx                      context.Context
 }
 
@@ -115,7 +113,6 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 			propertyTrafficReport, err := p.retrievePropertyTraffic(domain.Name, prop.Name, lasttime, endtime)
 			if err != nil {
-				// v12 Error Handling
 				if strings.Contains(err.Error(), "status: 500") {
 					logrus.Warnf("Unable to get traffic report for property %s: Internal error. Skipping.", prop.Name)
 					continue
@@ -219,7 +216,7 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string, start, end time.Time) (*PropertyTrafficResponse, error) {
-	// 1. Get the valid Traffic Window for Properties
+	// Get the valid Traffic Window for Properties
 	windowPath := "/gtm-api/v1/reports/traffic/properties-window"
 	windowReq, err := http.NewRequest(http.MethodGet, windowPath, nil)
 	if err != nil {
@@ -232,24 +229,21 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 		return nil, fmt.Errorf("failed to fetch property traffic window: %w", err)
 	}
 
-	// 2. Safety Fallback: Ensure the window isn't zero/unparsed
+	// Ensure the window isn't zero/unparsed
 	if window.EndTime.IsZero() || window.EndTime.Year() < 2000 {
 		logrus.Warnf("Property window for %s returned invalid dates. Using 48h fallback.", prop)
 		window.EndTime = ceilToGTMInterval(time.Now().UTC())
 		window.StartTime = floorToGTMInterval(window.EndTime.Add(-48 * time.Hour))
 	}
 
-	// 3. Align timestamps and apply the 15-minute "Lag Buffer"
 	qargsStart := floorToGTMInterval(start)
 	qargsEnd := ceilToGTMInterval(end)
 
-	// NEW: Mandatory Lag Buffer. Akamai 400s if you ask for data too recent.
 	maxAllowed := floorToGTMInterval(time.Now().UTC().Add(-15 * time.Minute))
 	if qargsEnd.After(maxAllowed) {
 		qargsEnd = maxAllowed
 	}
 
-	// Clip to Akamai's known window boundaries
 	if qargsStart.Before(window.StartTime) {
 		qargsStart = window.StartTime
 	}
@@ -257,13 +251,12 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 		qargsEnd = window.EndTime
 	}
 
-	// Range Safety Check
 	if qargsStart.After(qargsEnd) || qargsStart.Equal(qargsEnd) {
 		logrus.Warnf("Start/End time outside valid property window for %s. Skipping.", prop)
 		return &PropertyTrafficResponse{DataRows: []*PropertyTrafficData{}}, nil
 	}
 
-	// 3. Request actual Traffic Data
+	// Request actual Traffic Data
 	path := fmt.Sprintf("/gtm-api/v1/reports/traffic/domains/%s/properties/%s", domain, prop)
 	req, err := http.NewRequest(http.MethodGet, path, nil)
 	if err != nil {
@@ -271,7 +264,6 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 	}
 
 	q := req.URL.Query()
-	// TRUNCATE TO SECOND: Removes fractional seconds that cause 400s
 	q.Add("start", qargsStart.Truncate(time.Second).Format(time.RFC3339))
 	q.Add("end", qargsEnd.Truncate(time.Second).Format(time.RFC3339))
 	req.URL.RawQuery = q.Encode()
@@ -286,8 +278,7 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 		return nil, fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
-	// 4. Sort results (using the helper for PropertyTrafficData)
+	// Sort results (using the helper for PropertyTrafficData)
 	sortPropertyDataRowsByTimestamp(result.DataRows)
-
 	return &result, nil
 }

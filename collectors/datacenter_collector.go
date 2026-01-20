@@ -21,9 +21,7 @@ import (
 	"strings"
 	"time"
 
-	// Akamai v12 Package
 	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 )
@@ -38,26 +36,22 @@ type GTMDatacenterTrafficExporter struct {
 	DCLookbackDuration time.Duration
 	LastTimestamp      map[string]map[int]time.Time // [domain][datacenterID]
 	DCRegistry         *prometheus.Registry
-	AkamaiSession      session.Session // v12 Authenticated Session
+	AkamaiSession      session.Session
 	ctx                context.Context
 }
 
-// NewDatacenterTrafficCollector now requires the AkamaiSession created in util.go
 func NewDatacenterTrafficCollector(ctx context.Context, sess session.Session, r *prometheus.Registry, gtmMetricsConfig GTMMetricsConfig, gtmMetricPrefix string, tstart time.Time, lookbackDuration time.Duration) *GTMDatacenterTrafficExporter {
 
 	gtmDatacenterTrafficExporter = GTMDatacenterTrafficExporter{GTMConfig: gtmMetricsConfig, DCLookbackDuration: lookbackDuration, AkamaiSession: sess, ctx: ctx}
 	gtmDatacenterTrafficExporter.DCMetricPrefix = gtmMetricPrefix + "datacenter_traffic"
 	gtmDatacenterTrafficExporter.DCLookbackDuration = lookbackDuration
 	gtmDatacenterTrafficExporter.DCRegistry = r
-	// Populate LastTimestamp per domain, datacenter. Start time applies to all.
 	domainMap := make(map[string]map[int]time.Time)
 	for _, domain := range gtmMetricsConfig.Domains {
 		dcReqSummaryMap[domain.Name] = make(map[int]prometheus.Summary)
-		tStampMap := make(map[int]time.Time) // index by zone name
+		tStampMap := make(map[int]time.Time)
 		for _, dc := range domain.Datacenters {
 			tStampMap[dc.DatacenterID] = tstart
-
-			// Create and register Summaries by domain, datacenter. TODO: property granualarity?
 			dcSumMap := createDatacenterMaps(domain.Name, dc.DatacenterID)
 			r.MustRegister(dcSumMap)
 		}
@@ -118,8 +112,6 @@ func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 			dcTrafficReport, err := d.retrieveDatacenterTraffic(domain.Name, dc.DatacenterID, lasttime, endtime)
 
 			if err != nil {
-				// Note: In v12, we handle specific API status codes to decide if we skip
-				// If your retrieveDatacenterTraffic returns the status code in the error string:
 				if strings.Contains(err.Error(), "status: 500") {
 					logrus.Warnf("Unable to get traffic report for datacenter %d. Internal error ... Skipping.", dc.DatacenterID)
 					continue
@@ -224,21 +216,19 @@ func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, dc int, start, end time.Time) (*DcTrafficResponse, error) {
-	// 1. Get the valid Traffic Window for Datacenters
-	// Use the endpoint: /gtm-api/v1/reports/traffic/datacenters-window
+	// Get the valid Traffic Window for Datacenters
 	windowPath := "/gtm-api/v1/reports/traffic/datacenters-window"
 	windowReq, err := http.NewRequestWithContext(d.ctx, http.MethodGet, windowPath, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var window WindowResponse // Ensure this matches your API struct
+	var window WindowResponse
 	_, err = d.AkamaiSession.Exec(windowReq, &window)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch traffic window: %w", err)
 	}
 
-	// Parse Akamai window strings into time objects
 	winStart := window.StartTime
 	winEnd := window.EndTime
 
@@ -248,7 +238,7 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 		winStart = floorToGTMInterval(winEnd.Add(-48 * time.Hour))
 	}
 
-	// 2. Validate and adjust requested start/end against the available window
+	// Validate and adjust requested start/end against the available window
 	qargsStart := floorToGTMInterval(start)
 	qargsEnd := ceilToGTMInterval(end)
 
@@ -257,7 +247,6 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 		qargsEnd = maxAllowed
 	}
 
-	// Safety: Clip to the available Akamai window
 	if qargsStart.Before(winStart) {
 		qargsStart = winStart
 	}
@@ -270,7 +259,7 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 		return &DcTrafficResponse{DataRows: []*DatacenterTrafficData{}}, nil
 	}
 
-	// 3. Request actual Traffic Data
+	// Request actual Traffic Data
 	path := fmt.Sprintf("/gtm-api/v1/reports/traffic/domains/%s/datacenters/%d", domain, dc)
 	req, err := http.NewRequestWithContext(d.ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -292,8 +281,7 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 		return nil, fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
-	// 4. Sort results by timestamp for Prometheus consistency
+	// Sort results by timestamp for Prometheus consistency
 	sortDCDataRowsByTimestamp(result.DataRows)
-
 	return &result, nil
 }

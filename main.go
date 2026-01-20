@@ -22,20 +22,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
+	"github.com/akamai/akamai-gtm-metrics-exporter/collectors"
+	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	promcollectors "github.com/prometheus/client_golang/prometheus/collectors"
 	buildversion "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
-	"github.com/sirupsen/logrus" // Better leveled logging
-
-	kingpin "github.com/alecthomas/kingpin/v2"
-
-	// Akamai v12 Packages
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
-
-	"github.com/akamai/akamai-gtm-metrics-exporter/collectors"
+	"github.com/sirupsen/logrus"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -43,7 +39,7 @@ const (
 	defaultlistenaddress    = ":9800"
 	namespace               = "akamai_gtm_"
 	HoursInDay              = 24
-	trafficReportInterval   = 5 // mins
+	trafficReportInterval   = 5
 	lookbackDefaultDuration = 2 * 24 * time.Hour
 	prefillDefaultDuration  = 10 * time.Minute
 )
@@ -56,6 +52,8 @@ var (
 	edgegridClientToken  = kingpin.Flag("gtm.edgegrid-client-token", "The Akamai Edgegrid client_token credential.").String()
 	edgegridAccessToken  = kingpin.Flag("gtm.edgegrid-access-token", "The Akamai Edgegrid access_token credential.").String()
 	logLevel             = kingpin.Flag("log.level", "Set the logging level (debug, info, warn, error)").Default("info").String()
+	timestampLabel       = kingpin.Flag("gtm.timestamp-label", "Creates time series with traffic timestamp as label.").Bool()
+	trafficTimestamp     = kingpin.Flag("gtm.traffic-timestamp", "Create time series with traffic timestamp.").Bool()
 
 	// invalidMetricChars    = regexp.MustCompile("[^a-zA-Z0-9_:]")
 	lookbackDuration = lookbackDefaultDuration
@@ -67,12 +65,11 @@ var (
 // 2. Edgerc path
 // 3. Environment
 // 4. Default
-// initAkamaiSession creates a v12 session based on CLI flags or Edgerc
 func initAkamaiSession(gtmMetricsConfig collectors.GTMMetricsConfig) (session.Session, error) {
 	var config *edgegrid.Config
 	var err error
 
-	// 1. Check Command Line Flags
+	// 1. Try Flags first
 	if *edgegridHost != "" && *edgegridClientSecret != "" && *edgegridClientToken != "" && *edgegridAccessToken != "" {
 		config = &edgegrid.Config{
 			Host:         *edgegridHost,
@@ -80,25 +77,28 @@ func initAkamaiSession(gtmMetricsConfig collectors.GTMMetricsConfig) (session.Se
 			ClientSecret: *edgegridClientSecret,
 			AccessToken:  *edgegridAccessToken,
 		}
-	} else {
-		// 2. Check Edgerc Path (v12 style)
-		config, err = edgegrid.New(
-			edgegrid.WithFile(gtmMetricsConfig.EdgercPath),
-			edgegrid.WithSection(gtmMetricsConfig.EdgercSection),
-		)
+	}
+
+	// 2. If flags weren't used/complete, use the EdgegridInit pattern
+	if config == nil {
+		options := []edgegrid.Option{edgegrid.WithEnv(true)}
+		if gtmMetricsConfig.EdgercPath != "" {
+			options = append(options, edgegrid.WithFile(gtmMetricsConfig.EdgercPath))
+			options = append(options, edgegrid.WithSection(gtmMetricsConfig.EdgercSection))
+		}
+
+		config, err = edgegrid.New(options...)
 		if err != nil {
-			return nil, fmt.Errorf("error loading edgerc: %w", err)
+			return nil, err
 		}
 	}
 
-	// Create the v12 session
-	sess, err := session.New(session.WithSigner(config), session.WithHTTPTracing(false))
-	if err != nil {
-		return nil, fmt.Errorf("error creating session: %w", err)
-
+	// 3. THE CRITICAL ADDITION: Verify the host isn't empty
+	if config.Host == "" {
+		return nil, fmt.Errorf("akamai host is empty: check your environment variables (AKAMAI_HOST) or edgerc file")
 	}
 
-	return sess, nil
+	return session.New(session.WithSigner(config), session.WithHTTPTracing(false))
 }
 
 // Calculate window duration based on config and save in lookbackDuration global variable
@@ -106,7 +106,7 @@ func calcWindowDuration(window string) (time.Duration, error) {
 
 	var datawin int
 	var err error
-	var multiplier time.Duration = time.Hour * time.Duration(HoursInDay) // assume days
+	var multiplier time.Duration = time.Hour * time.Duration(HoursInDay)
 
 	logrus.Debugf("Window: %s", window)
 	if window == "" {
@@ -148,6 +148,10 @@ func setupLogging(level string) {
 	})
 }
 
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func main() {
 	kingpin.Version(version.Print(namespace + "metrics_exporter"))
 	kingpin.HelpFlag.Short('h')
@@ -165,7 +169,14 @@ func main() {
 	}
 	logrus.Debugf("Exporter configuration: [%v]", gtmMetricsConfig)
 
-	// Initialize v12 Session
+	if *timestampLabel {
+		gtmMetricsConfig.TSLabel = true
+	}
+	if *trafficTimestamp {
+		gtmMetricsConfig.UseTimestamp = boolPtr(true)
+	}
+
+	// Initialize Session
 	akamaiSession, err := initAkamaiSession(gtmMetricsConfig)
 	if err != nil {
 		logrus.Fatalf("Error initializing Akamai session: %v", err)
@@ -174,7 +185,7 @@ func main() {
 	ctx := context.Background()
 
 	// Time window calculations
-	tstart := time.Now().UTC().Add(-1 * prefillDuration) // assume start time is Exporter launch less default prefill
+	tstart := time.Now().UTC().Add(-1 * prefillDuration)
 	if gtmMetricsConfig.SummaryWindow != "" {
 		lookbackDuration, err = calcWindowDuration(gtmMetricsConfig.SummaryWindow)
 		if err != nil {
@@ -207,11 +218,9 @@ func main() {
 		buildversion.NewCollector(namespace+"metrics_exporter"),
 	)
 
-	// If you want to print the version to the console on startup:
 	logrus.Infof("Starting exporter %s", version.Info())
 
 	// Register the various GTM collectors
-	// We pass the session and the shared registry/config to each
 	r.MustRegister(collectors.NewDatacenterTrafficCollector(ctx, akamaiSession, r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
 	r.MustRegister(collectors.NewPropertyTrafficCollector(ctx, akamaiSession, r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
 	r.MustRegister(collectors.NewLivenessTrafficCollector(ctx, akamaiSession, r, gtmMetricsConfig, namespace, tstart, lookbackDuration))
@@ -236,7 +245,6 @@ func main() {
 
 func loadConfig(configFile string) (collectors.GTMMetricsConfig, error) {
 	if fileExists(configFile) {
-		// Use os.ReadFile instead of ioutil.ReadFile
 		configData, err := os.ReadFile(configFile)
 		if err != nil {
 			return collectors.GTMMetricsConfig{}, err

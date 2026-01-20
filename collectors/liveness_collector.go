@@ -21,9 +21,7 @@ import (
 	"strings"
 	"time"
 
-	// Akamai v12 Package
 	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 )
@@ -37,9 +35,9 @@ type GTMLivenessTrafficExporter struct {
 	GTMConfig                GTMMetricsConfig
 	LivenessMetricPrefix     string
 	LivenessLookbackDuration time.Duration
-	LastTimestamp            map[string]map[string]time.Time // index by domain, liveness
+	LastTimestamp            map[string]map[string]time.Time
 	LivenessRegistry         *prometheus.Registry
-	AkamaiSession            session.Session // v12 Authenticated Session
+	AkamaiSession            session.Session
 	ctx                      context.Context
 }
 
@@ -49,7 +47,7 @@ func NewLivenessTrafficCollector(ctx context.Context, sess session.Session, r *p
 		GTMConfig:                gtmMetricsConfig,
 		LivenessLookbackDuration: lookbackDuration,
 		AkamaiSession:            sess,
-		ctx:                      ctx, // Inject v12 Session
+		ctx:                      ctx,
 	}
 	gtmLivenessTrafficExporter.LivenessMetricPrefix = gtmMetricPrefix + "property_liveness_errors"
 	gtmLivenessTrafficExporter.LivenessRegistry = r
@@ -99,7 +97,6 @@ func (l *GTMLivenessTrafficExporter) getDatacenterHistogramMetrics(domain, prope
 	if esum, ok := livenessErrorsSummaryMap[domain][property][dcid]; ok {
 		histMap["errors"] = esum
 	} else {
-		// doesn't exist. need to create
 		labels := prometheus.Labels{"domain": domain, "property": property, "datacenter": strconv.Itoa(dcid)}
 		livenessErrorsSummaryMap[domain][property][dcid] = prometheus.NewSummary(
 			prometheus.SummaryOpts{
@@ -137,7 +134,6 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 			livenessTrafficReport, err := l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, lasttime)
 			if err != nil {
-				// Handle v12 style error checking via string contains or status if available
 				if strings.Contains(err.Error(), "status: 500") {
 					logrus.Warnf("Unable to get liveness errors for %s: Internal Server Error. Skipping.", prop.PropertyName)
 					continue
@@ -222,7 +218,7 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agentID, targetID string, start time.Time) (*LivenessErrorsResponse, error) {
-	// 1. Fetch Window
+	// Fetch Window
 	windowPath := "/gtm-api/v1/reports/liveness-tests/window"
 	windowReq, err := http.NewRequest(http.MethodGet, windowPath, nil)
 	if err != nil {
@@ -235,19 +231,15 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 		return nil, fmt.Errorf("failed to fetch liveness window: %w", err)
 	}
 
-	// --- FIX: Window Parsing Guard ---
-	// If Akamai returns an empty window, or it fails to unmarshal,
-	// we use 'start' as our anchor so we don't send 0001-01-01.
 	anchorTime := start
 	if !livenessWindow.EndTime.IsZero() && livenessWindow.EndTime.Year() > 1 {
 		anchorTime = livenessWindow.EndTime
 	}
 
-	// 2. Align Timestamps
 	qargsStart := floorToGTMInterval(start)
 	qargsEnd := floorToGTMInterval(anchorTime)
 
-	// 3. Build the actual report request
+	// Build the actual report request
 	path := fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", domain, prop)
 	req, err := http.NewRequest(http.MethodGet, path, nil)
 	if err != nil {
@@ -255,9 +247,6 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 	}
 
 	q := req.URL.Query()
-
-	// --- FIX: EXACT DATE FORMAT FROM DOCS ---
-	// Format: YYYY-MM-DD
 	q.Add("date", qargsStart.Format("2006-01-02"))
 
 	// Add start/end as ISO 8601 strings (Truncated to seconds)
@@ -271,7 +260,6 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 	}
 	req.URL.RawQuery = q.Encode()
 
-	// LOG THE URL: Compare this to your tech docs example
 	logrus.Infof("Liveness Request: %s?%s", path, req.URL.RawQuery)
 
 	var result LivenessErrorsResponse
@@ -280,7 +268,6 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 		return nil, err
 	}
 
-	// If still 400, print the body so we can see Akamai's specific complaint
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
