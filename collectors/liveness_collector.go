@@ -124,15 +124,23 @@ func (l *GTMLivenessTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
 func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	logrus.Debugf("Entering GTM Property Liveness Errors Collect")
 
-	endtime := time.Now().UTC()
+	//endtime := time.Now().UTC()
 
 	for _, domain := range l.GTMConfig.Domains {
 		logrus.Debugf("Processing domain %s", domain.Name)
 		for _, prop := range domain.Liveness {
-			lasttime := l.LastTimestamp[domain.Name][prop.PropertyName].Add(time.Minute)
+			nextIntervalStart := l.LastTimestamp[domain.Name][prop.PropertyName].Add(5 * time.Minute)
+
+			safeNow := time.Now().UTC().Add(-15 * time.Minute)
+
+			if nextIntervalStart.After(safeNow) {
+				logrus.Debugf("Liveness next interval %v is too recent. Skipping.", nextIntervalStart)
+				continue
+			}
+
 			logrus.Debugf("Fetching liveness errors Report for property %s in domain %s.", prop.PropertyName, domain.Name)
 
-			livenessTrafficReport, err := l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, lasttime)
+			livenessTrafficReport, err := l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, nextIntervalStart)
 			if err != nil {
 				if strings.Contains(err.Error(), "status: 500") {
 					logrus.Warnf("Unable to get liveness errors for %s: Internal Server Error. Skipping.", prop.PropertyName)
@@ -142,14 +150,6 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				continue
 			}
 
-			if len(livenessTrafficReport.DataRows) < 1 && endtime.Day() != lasttime.Day() {
-				lasttime = lasttime.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
-				livenessTrafficReport, err = l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, lasttime)
-				if err != nil {
-					logrus.Errorf("Unable to get liveness report for property %s ... Skipping. Error: %s", prop.PropertyName, err.Error())
-					continue
-				}
-			}
 			logrus.Debugf("Traffic Metadata: [%v]", livenessTrafficReport.Metadata)
 
 			for _, reportInstance := range livenessTrafficReport.DataRows {

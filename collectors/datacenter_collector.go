@@ -90,26 +90,28 @@ func (d *GTMDatacenterTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- prometheus.NewDesc(d.DCMetricPrefix, "Akamai GTM Datacenter Traffic", nil, nil)
 }
 
-// Collect function handles the scraping of GTM Datacenter traffic metrics
+// Collect function
 func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	logrus.Debug("Entering GTM DC Traffic Collect")
 
-	endtime := time.Now().UTC()
+	//endtime := time.Now().UTC()
 
 	for _, domain := range d.GTMConfig.Domains {
 		logrus.Debugf("Processing domain %s", domain.Name)
 		for _, dc := range domain.Datacenters {
 
-			// Calculate the start time based on last recorded timestamp
-			lasttime := d.LastTimestamp[domain.Name][dc.DatacenterID].Add(time.Minute)
-			if endtime.Before(lasttime.Add(time.Minute * 5)) {
-				lasttime = lasttime.Add(time.Minute * 5)
+			nextIntervalStart := d.LastTimestamp[domain.Name][dc.DatacenterID].Add(5 * time.Minute)
+
+			safeNow := time.Now().UTC().Add(-15 * time.Minute)
+
+			if nextIntervalStart.After(safeNow) {
+				logrus.Debugf("Next interval %v is too recent (SafeNow: %v). Skipping DC %d.", nextIntervalStart, safeNow, dc.DatacenterID)
+				continue
 			}
 
 			logrus.Debugf("Fetching datacenter Report for DC %d in domain %s.", dc.DatacenterID, domain.Name)
 
-			// Call the retrieval function
-			dcTrafficReport, err := d.retrieveDatacenterTraffic(domain.Name, dc.DatacenterID, lasttime, endtime)
+			dcTrafficReport, err := d.retrieveDatacenterTraffic(domain.Name, dc.DatacenterID, nextIntervalStart, safeNow)
 
 			if err != nil {
 				if strings.Contains(err.Error(), "status: 500") {
@@ -135,13 +137,11 @@ func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 					continue
 				}
 
-				// Skip if we have already processed this timestamp
 				if !instanceTimestamp.After(d.LastTimestamp[domain.Name][dc.DatacenterID]) {
 					logrus.Debugf("Instance timestamp: [%v] already processed. Last: [%v]", instanceTimestamp, d.LastTimestamp[domain.Name][dc.DatacenterID])
 					continue
 				}
 
-				// Log warning if we skipped a 5-minute interval
 				if instanceTimestamp.After(d.LastTimestamp[domain.Name][dc.DatacenterID].Add(time.Minute * (trafficReportInterval + 1))) {
 					logrus.Warnf("Missing report interval. Current: %v, Last: %v", instanceTimestamp, d.LastTimestamp[domain.Name][dc.DatacenterID])
 				}

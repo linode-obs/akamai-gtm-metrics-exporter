@@ -100,47 +100,64 @@ func (p *GTMPropertyTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
 func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	logrus.Debugf("Entering GTM Property Traffic Collect")
 
-	endtime := time.Now().UTC()
-
 	for _, domain := range p.GTMConfig.Domains {
 		logrus.Debugf("Processing domain %s", domain.Name)
 		for _, prop := range domain.Properties {
-			lasttime := p.LastTimestamp[domain.Name][prop.Name].Add(time.Minute)
-			if endtime.Before(lasttime.Add(time.Minute * 5)) {
-				lasttime = lasttime.Add(time.Minute * 5)
-			}
-			logrus.Debugf("Fetching property Report for property %s in domain %s.", prop.Name, domain.Name)
 
-			propertyTrafficReport, err := p.retrievePropertyTraffic(domain.Name, prop.Name, lasttime, endtime)
+			nextIntervalStart := p.LastTimestamp[domain.Name][prop.Name].Add(5 * time.Minute)
+
+			safeNow := time.Now().UTC().Add(-15 * time.Minute)
+
+			if nextIntervalStart.After(safeNow) {
+				logrus.Debugf("Property %s next interval %v is too recent (SafeNow: %v). Skipping.", prop.Name, nextIntervalStart, safeNow)
+				continue
+			}
+
+			targetEnd := nextIntervalStart.Add(5 * time.Minute)
+
+			logrus.Debugf("Fetching property Report for %s in domain %s (Window: %v to %v)", prop.Name, domain.Name, nextIntervalStart, targetEnd)
+
+			propertyTrafficReport, err := p.retrievePropertyTraffic(domain.Name, prop.Name, nextIntervalStart, targetEnd)
 			if err != nil {
 				if strings.Contains(err.Error(), "status: 500") {
-					logrus.Warnf("Unable to get traffic report for property %s: Internal error. Skipping.", prop.Name)
+					logrus.Warnf("Internal error for property %s. Skipping.", prop.Name)
 					continue
 				}
 				logrus.Errorf("Unable to get traffic report for property %s. Error: %s", prop.Name, err.Error())
 				continue
 			}
+
 			logrus.Debugf("Traffic Metadata: [%v]", propertyTrafficReport.Metadata)
+
+			if len(propertyTrafficReport.DataRows) == 0 {
+				logrus.Debugf("No traffic found for %s in window. Advancing timestamp.", prop.Name)
+				p.LastTimestamp[domain.Name][prop.Name] = nextIntervalStart
+				continue
+			}
+
 			for _, reportInstance := range propertyTrafficReport.DataRows {
 				instanceTimestamp, err := parseTimeString(reportInstance.Timestamp, GTMTrafficLongTimeFormat)
 				if err != nil {
-					logrus.Errorf("Instance timestamp invalid  ... Skipping. Error: %s", err.Error())
+					logrus.Errorf("Instance timestamp invalid ... Skipping. Error: %s", err.Error())
 					continue
 				}
+
 				if !instanceTimestamp.After(p.LastTimestamp[domain.Name][prop.Name]) {
 					continue
 				}
 
 				var aggReqs int64
 				var baseLabels = []string{"domain", "property"}
+
 				for _, instanceDC := range reportInstance.Datacenters {
 					aggReqs += instanceDC.Requests
+
+					// Filter and emit per-datacenter/target metrics if configured
 					if len(prop.DatacenterIDs) > 0 || len(prop.DCNicknames) > 0 || len(prop.Targets) > 0 {
 						var tsLabels []string
 						var filterVal string
 						var filterLabel string
 
-						// Filtering Logic
 						if intSliceContains(prop.DatacenterIDs, instanceDC.DatacenterId) {
 							filterVal = strconv.Itoa(instanceDC.DatacenterId)
 							filterLabel = "datacenterid"
@@ -164,11 +181,9 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 							var reqsmetric prometheus.Metric
 							if p.GTMConfig.TSLabel {
-								reqsmetric = prometheus.MustNewConstMetric(
-									desc, prometheus.GaugeValue, float64(instanceDC.Requests), domain.Name, prop.Name, filterVal, ts)
+								reqsmetric = prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(instanceDC.Requests), domain.Name, prop.Name, filterVal, ts)
 							} else {
-								reqsmetric = prometheus.MustNewConstMetric(
-									desc, prometheus.GaugeValue, float64(instanceDC.Requests), domain.Name, prop.Name, filterVal)
+								reqsmetric = prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(instanceDC.Requests), domain.Name, prop.Name, filterVal)
 							}
 
 							if p.GTMConfig.UseTimestamp != nil && !*p.GTMConfig.UseTimestamp {
@@ -180,6 +195,7 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 					}
 				}
 
+				// Emit aggregate metric if no specific filters were applied
 				if len(prop.DatacenterIDs) < 1 && len(prop.DCNicknames) < 1 && len(prop.Targets) < 1 {
 					tsLabels := baseLabels
 					if p.GTMConfig.TSLabel {
@@ -190,11 +206,9 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 					var reqsmetric prometheus.Metric
 					if p.GTMConfig.TSLabel {
-						reqsmetric = prometheus.MustNewConstMetric(
-							desc, prometheus.GaugeValue, float64(aggReqs), domain.Name, prop.Name, ts)
+						reqsmetric = prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(aggReqs), domain.Name, prop.Name, ts)
 					} else {
-						reqsmetric = prometheus.MustNewConstMetric(
-							desc, prometheus.GaugeValue, float64(aggReqs), domain.Name, prop.Name)
+						reqsmetric = prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(aggReqs), domain.Name, prop.Name)
 					}
 
 					if p.GTMConfig.UseTimestamp != nil && !*p.GTMConfig.UseTimestamp {
@@ -204,11 +218,11 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 					}
 				}
 
+				// Update Summary and last timestamp
 				propertyReqSummaryMap[domain.Name][prop.Name].Observe(float64(aggReqs))
+				p.LastTimestamp[domain.Name][prop.Name] = instanceTimestamp
 
-				if instanceTimestamp.After(p.LastTimestamp[domain.Name][prop.Name]) {
-					p.LastTimestamp[domain.Name][prop.Name] = instanceTimestamp
-				}
+				// Break to process exactly one interval per scrape
 				break
 			}
 		}
