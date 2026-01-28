@@ -93,7 +93,6 @@ func initAkamaiSession(gtmMetricsConfig collectors.GTMMetricsConfig) (session.Se
 		}
 	}
 
-	// 3. THE CRITICAL ADDITION: Verify the host isn't empty
 	if config.Host == "" {
 		return nil, fmt.Errorf("akamai host is empty: check your environment variables (AKAMAI_HOST) or edgerc file")
 	}
@@ -185,7 +184,7 @@ func main() {
 	ctx := context.Background()
 
 	// Time window calculations
-	tstart := time.Now().UTC().Add(-1 * prefillDuration)
+	tstart := time.Now().UTC().Add(-15 * time.Minute).Add(-1 * prefillDuration) // assume start time is Exporter launch less default prefill
 	if gtmMetricsConfig.SummaryWindow != "" {
 		lookbackDuration, err = calcWindowDuration(gtmMetricsConfig.SummaryWindow)
 		if err != nil {
@@ -204,6 +203,8 @@ func main() {
 	} else {
 		logrus.Warnf("Prefill window is not configured. Using default")
 	}
+
+	tstart = tstart.Truncate(5 * time.Minute)
 
 	logrus.Infof("GTM Metrics exporter lookback: %v, start time: %v", lookbackDuration, tstart)
 
