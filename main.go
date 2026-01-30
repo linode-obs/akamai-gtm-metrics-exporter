@@ -51,9 +51,10 @@ var (
 	edgegridClientSecret = kingpin.Flag("gtm.edgegrid-client-secret", "The Akamai Edgegrid client_secret credential.").String()
 	edgegridClientToken  = kingpin.Flag("gtm.edgegrid-client-token", "The Akamai Edgegrid client_token credential.").String()
 	edgegridAccessToken  = kingpin.Flag("gtm.edgegrid-access-token", "The Akamai Edgegrid access_token credential.").String()
-	logLevel             = kingpin.Flag("log.level", "Set the logging level (debug, info, warn, error)").Default("info").String()
+	logLevel             = kingpin.Flag("log.level", "Set the logging level (debug, info, warn, error, fatal)").Default("info").String()
 	timestampLabel       = kingpin.Flag("gtm.timestamp-label", "Creates time series with traffic timestamp as label.").Bool()
 	trafficTimestamp     = kingpin.Flag("gtm.traffic-timestamp", "Create time series with traffic timestamp.").Bool()
+	logFormat            = kingpin.Flag("log.format", "Set the log target and format. Example: logger:stderr or logger:stdout?json=true").Default("logger:stderr").String()
 
 	// invalidMetricChars    = regexp.MustCompile("[^a-zA-Z0-9_:]")
 	lookbackDuration = lookbackDefaultDuration
@@ -136,15 +137,26 @@ func calcWindowDuration(window string) (time.Duration, error) {
 
 }
 
-func setupLogging(level string) {
+func setupLogging(level string, format string) {
 	lvl, err := logrus.ParseLevel(level)
 	if err != nil {
 		logrus.Fatalf("Invalid log level: %v", err)
 	}
 	logrus.SetLevel(lvl)
-	logrus.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-	})
+
+	if strings.Contains(format, "json=true") {
+		logrus.SetFormatter(&logrus.JSONFormatter{})
+	} else {
+		logrus.SetFormatter(&logrus.TextFormatter{
+			FullTimestamp: true,
+		})
+	}
+
+	if strings.Contains(format, "stdout") {
+		logrus.SetOutput(os.Stdout)
+	} else {
+		logrus.SetOutput(os.Stderr)
+	}
 }
 
 func boolPtr(b bool) *bool {
@@ -156,7 +168,7 @@ func main() {
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
-	setupLogging(*logLevel)
+	setupLogging(*logLevel, *logFormat)
 
 	logrus.Infof("Config file: %s", *configFile)
 	logrus.Infof("Starting GTM Metrics exporter %s", version.Info())
