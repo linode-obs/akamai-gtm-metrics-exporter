@@ -15,7 +15,6 @@
 all::
 
 # 1. PLATFORM DETECTION (Must be at the top)
-# Detects your local machine (e.g., darwin/arm64 for your M4)
 DETECTED_OS   := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 DETECTED_ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 
