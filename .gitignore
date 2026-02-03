@@ -18,3 +18,4 @@ prometheus.yml
 vendor/
 build/
 gtm_config.yml
+bin/

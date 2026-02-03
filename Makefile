@@ -22,8 +22,12 @@ DETECTED_ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64
 DOCKER_REPO       ?= akamai
 DOCKER_IMAGE_NAME ?= akamai-gtm-metrics-exporter
 # These defaults ensure ARCH and OS are never empty
-OS                ?= $(DETECTED_OS)
-ARCH              ?= $(DETECTED_ARCH)
+OS   ?= $(GOOS)
+ARCH ?= $(GOARCH)
+
+OS   ?= $(DETECTED_OS)
+ARCH ?= $(DETECTED_ARCH)
+
 
 PROMTOOL_VERSION ?= 3.9.1
 PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
@@ -65,18 +69,18 @@ docker:
 STATICCHECK_IGNORE =
 
 # Use CGO for non-Linux builds.
-ifeq ($(GOOS), linux)
+ifeq ($(OS), linux)
     PROMU_CONF ?= .promu.yml
 else
-    ifndef GOOS
+    ifndef OS
         ifeq ($(GOHOSTOS), linux)
             PROMU_CONF ?= .promu.yml
         else
             PROMU_CONF ?= .promu-cgo.yml
         endif
     else
-        ifeq ($(GOOS), openbsd)
-            ifeq ($(GOARCH), amd64)
+        ifeq ($(OS), openbsd)
+            ifeq ($(ARCH), amd64)
                 PROMU_CONF ?= .promu.yml
             else
                 PROMU_CONF ?= .promu-cgo.yml
@@ -103,6 +107,11 @@ unused:
 
 .PHONY: promtool
 promtool: $(PROMTOOL)
+
+.PHONY: release-build
+release-build:
+	@echo ">> release build for $(OS)/$(ARCH)"
+	$(MAKE) build
 
 $(PROMTOOL):
 	@echo ">> downloading promtool v$(PROMTOOL_VERSION)"
