@@ -1,3 +1,8 @@
+## 0.2.0 / 2026-01
+* Upgraded the plugin to use Akamai Edgegrid v12
+* Upgraded the plugin to use latest Prometheus Go libraries
+* Added support for arm64
+
 ## 0.1.0 / 2021-01-31
 
 Initial release.
