@@ -117,7 +117,7 @@ Note: targets point to GTM Exporters.
 ## Run the binary
 
 ```bash
-./akamai-gtm-metrics-traffic-exporter
+./akamai-gtm-metrics-exporter
 ```
 
 In the log, the exporter will publish a series of INFO messages to show normal operation. Look for the `Beginning to serve on address:` message to learn its port.
@@ -144,7 +144,7 @@ akamai_gtm_metrics_exporter_build_info{branch="master",goversion="go1.15.6",revi
 Use -h or --help flag to list available options.
 
 ```
-./akamai-gtm-metrics-traffic-exporter --help
+./akamai-gtm-metrics-exporter --help
 usage: akamai-gtm-metrics-exporter [<flags>]
 
 Flags:
@@ -174,13 +174,13 @@ Flags:
 `Invoke exporter with a configuration file path`
 
 ```bash
-./akamai-gtm-metrics-traffic-exporter --config.file=gtm_metrics_example_config.yml
+./akamai-gtm-metrics-exporter --config.file=gtm_metrics_example_config.yml
 ```
 
 `Invoke exporter with a configuration file path and Edgegrid authentication credentials`
 
 ```bash
-./akamai-gtm-metrics-traffic-exporter --config.file=gtm_metrics_example_config.yml --edgedns.edgegrid-host akab-abcdefghijklmnop-01234567890aaaaa.luna.akamaiapis.net --edgedns.edgegrid-access-token example_provided_access_token --edgedns.edgegrid-client-token example_provided_client_token --edgedns.edgegrid-client-secret example_provided_client_secret
+./akamai-gtm-metrics-exporter --config.file=gtm_metrics_example_config.yml --edgedns.edgegrid-host akab-abcdefghijklmnop-01234567890aaaaa.luna.akamaiapis.net --edgedns.edgegrid-access-token example_provided_access_token --edgedns.edgegrid-client-token example_provided_client_token --edgedns.edgegrid-client-secret example_provided_client_secret
 ```
 
 ## Collectors
