@@ -12,7 +12,7 @@ This technical preview of the Prometheus Akamai Global Traffic Management (GTM) 
 
 * Prometheus environment.
 * [Go environment](https://golang.org/doc/install).
-* Valid API client with authorization to use the Global Traffic Management Reporting API. [Akamai API Authentication](https://techdocs.akamai.com/developer/docs/set-up-authentication-credentials) provides an overview and further information pertaining to the generation of authorization credentials for API based applications and tools.
+* Valid API client with authorization to use the Global Traffic Management Reporting API. [Akamai API Authentication](https://techdocs.akamai.com/developer/docs/edgegrid) provides an overview and further information pertaining to the generation of authorization credentials for API based applications and tools.
 
 ## Install
 
@@ -123,12 +123,12 @@ Note: targets point to GTM Exporters.
 In the log, the exporter will publish a series of INFO messages to show normal operation. Look for the `Beginning to serve on address:` message to learn its port.
 
 ```
-INFO[0000] Config file: gtm_metrics_config.yml           source="main.go:165"
-INFO[0000] Starting GTM Metrics exporter. (version=0.1.0, branch=master, revision=99e6b08228e8772cde72818b5dcdd1b73ae633b1)  source="main.go:166"
-INFO[0000] Build context: (go=go1.14.9, user=elynes@bos-lhvhpa, date=20210127-19:53:16)  source="main.go:167"
-INFO[0000] akamai_gtm_metrics_exporter config loaded     source="main.go:261"
-INFO[0000] GTM Metrics exporter start time: 2021-01-27 15:53:27.062040712 +0000 UTC  source="main.go:194"
-INFO[0000] Beginning to serve on address :9800           source="main.go:231"
+INFO[2026-02-13T16:37:25+05:30] Config file: gtm_config.yml                  
+INFO[2026-02-13T16:37:25+05:30] Starting GTM Metrics exporter. (version=0.2.0, branch=master, revision=8072912e01bbe4e401bd018e2ec531497d3090bd) 
+INFO[2026-02-13T16:37:25+05:30] Build context: (go=go1.25.5, platform=darwin/arm64, user=, date=20260213-11:02:40, tags=netgo static_build) 
+INFO[2026-02-13T16:37:25+05:30] akamai_gtm_metrics_exporter config loaded    
+INFO[2026-02-13T16:37:25+05:30] GTM Metrics exporter start time: 2026-02-13 10:37:25.345491 +0000 UTC 
+INFO[2026-02-13T16:37:25+05:30] Beginning to serve on address :9800
 ```
 
 Note: running the exporter without the appropriate settings to access the GTM Traffic Reporting API will only publish build info like below. To validate, visit the exporter's metrics view with a browser using local host and the exporter's port known from one of the INFO startup messages (e.g., http://localhost:9800/metrics).
@@ -136,7 +136,7 @@ Note: running the exporter without the appropriate settings to access the GTM Tr
 ```
 # HELP akamai_gtm_metrics_exporter_build_info A metric with a constant '1' value labeled by version, revision, branch, and goversion from which akamai_gtm_metrics_exporter was built.
 # TYPE akamai_gtm_merics_exporter_build_info gauge
-akamai_gtm_metrics_exporter_build_info{branch="master",goversion="go1.15.6",revision="84667d49203590616cd6d1b07d75715eaff31392",version="0.1.0"} 1
+akamai_gtm_metrics_exporter_build_info{branch="master",goversion="go1.25.5",revision="8072912e01bbe4e401bd018e2ec531497d3090bd",version="0.2.0"} 1
 ```
 
 ### Command line arguments
@@ -312,7 +312,7 @@ akamai_gtm_datacenter_traffic_requests_per_interval_summary_sum{datacenter="3131
 akamai_gtm_datacenter_traffic_requests_per_interval_summary_count{datacenter="3131",domain="test.akadns.net"} 0
 # HELP akamai_gtm_metrics_exporter_build_info A metric with a constant '1' value labeled by version, revision, branch, and goversion from which akamai_gtm_metrics_exporter was built.
 # TYPE akamai_gtm_metrics_exporter_build_info gauge
-akamai_gtm_metrics_exporter_build_info{branch="",goversion="go1.14.9",revision="",version=""} 1
+akamai_gtm_metrics_exporter_build_info{branch="",goversion="go1.25.5",revision="",version=""} 1
 # HELP akamai_gtm_property_liveness_errors_datacenter_failure_duration Datacenter falure duration (per domain, property, datacenter)
 # TYPE akamai_gtm_property_liveness_errors_datacenter_failure_duration gauge
 akamai_gtm_property_liveness_errors_datacenter_failure_duration{datacenter="3201",domain="test.akadns.net",property="testprop"} 0
