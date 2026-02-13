@@ -41,22 +41,15 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     
     echo ">> Compiling for ${OS}/${ARCH}..."
 
-    # Handle Windows .exe extension
-    EXT=""
-    if [ "$OS" == "windows" ]; then EXT=".exe"; fi
-
     # Target output name
-    TARGET_FILE="build/${BINARY_NAME}-${VERSION}.${OS}-${ARCH}${EXT}"
+    TARGET_FILE="build/${BINARY_NAME}-${VERSION}.${OS}-${ARCH}"
 
-    # Build using make + environment overrides
-    # CGO_ENABLED=0 ensures the binaries are portable/static
-    GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 make build PROMU_FLAGS="-trimpath"
+    GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 make build PROMU_FLAGS="-trimpath" PREFIX=.
 
-    # Check common output locations (root or bin/)
-    if [ -f "./${BINARY_NAME}${EXT}" ]; then
-        mv "./${BINARY_NAME}${EXT}" "$TARGET_FILE"
-    elif [ -f "./bin/${BINARY_NAME}${EXT}" ]; then
-        mv "./bin/${BINARY_NAME}${EXT}" "$TARGET_FILE"
+    if [ -f "./${BINARY_NAME}" ]; then
+        mv "./${BINARY_NAME}" "$TARGET_FILE"
+    elif [ -f "./bin/${BINARY_NAME}" ]; then
+        mv "./bin/${BINARY_NAME}" "$TARGET_FILE"
     else
         echo "!! Error: Could not find binary for ${OS}/${ARCH}"
         exit 1
