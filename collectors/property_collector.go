@@ -271,8 +271,6 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string, start, end time.Time) (*PropertyTrafficResponse, error) {
-	// 1. Fetch Window
-	// Use an intermediate struct to handle the API's string timestamps
 	var apiWindow struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
@@ -281,46 +279,48 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 	windowPath := "/gtm-api/v1/reports/traffic/properties-window"
 	windowReq, _ := http.NewRequestWithContext(p.ctx, http.MethodGet, windowPath, nil)
 
-	// session.Exec unmarshals directly into the target.
-	// We check for errors returned by the Akamai session.
 	_, err := p.AkamaiSession.Exec(windowReq, &apiWindow)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch property traffic window: %w", err)
 	}
 
-	// Convert strings to time.Time objects to match the old WindowResponse logic
-	windowStart, _ := time.Parse(time.RFC3339, apiWindow.Start)
-	windowEnd, _ := time.Parse(time.RFC3339, apiWindow.End)
+	windowStart, err := time.Parse(time.RFC3339, apiWindow.Start)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start time format from API (%s): %w", apiWindow.Start, err)
+	}
+	windowEnd, err := time.Parse(time.RFC3339, apiWindow.End)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end time format from API (%s): %w", apiWindow.End, err)
+	}
 
-	// 2. Original Logic: Boundary validation
 	qargs := make(map[string]string)
 
-	// Match the exact logic for Start Time
 	if windowStart.Before(start) {
 		if windowEnd.After(start) {
-			qargs["start"], _ = convertTimeFormat(start, time.RFC3339)
+			qargs["start"], err = convertTimeFormat(start, time.RFC3339)
 		} else {
-			qargs["start"], _ = convertTimeFormat(windowEnd, time.RFC3339)
+			qargs["start"], err = convertTimeFormat(windowEnd, time.RFC3339)
 		}
 	} else {
-		qargs["start"], _ = convertTimeFormat(windowStart, time.RFC3339)
+		qargs["start"], err = convertTimeFormat(windowStart, time.RFC3339)
 	}
-
-	// Match the exact logic for End Time
+	if err != nil {
+		return nil, err
+	}
 	if windowEnd.Before(end) {
-		qargs["end"], _ = convertTimeFormat(windowEnd, time.RFC3339)
+		qargs["end"], err = convertTimeFormat(windowEnd, time.RFC3339)
 	} else {
-		qargs["end"], _ = convertTimeFormat(end, time.RFC3339)
+		qargs["end"], err = convertTimeFormat(end, time.RFC3339)
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	// Exact validation check and fallback response
 	if qargs["start"] >= qargs["end"] {
 		logrus.Warnf("Start or End time outside valid property window for %s. Skipping.", prop)
-		// Return empty results with empty slice to prevent nil pointer panics in the exporter
 		return &PropertyTrafficResponse{DataRows: []*PropertyTrafficData{}}, nil
 	}
 
-	// 3. Request actual Traffic Data
 	path := fmt.Sprintf("/gtm-api/v1/reports/traffic/domains/%s/properties/%s", domain, prop)
 	req, _ := http.NewRequestWithContext(p.ctx, http.MethodGet, path, nil)
 
@@ -329,14 +329,11 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 	q.Add("end", qargs["end"])
 	req.URL.RawQuery = q.Encode()
 
-	// Important: Akamai's GTM reporting API often requires this specific header
-	// for GET requests containing timestamps, as seen in the old setEncodedHeader()
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	var result PropertyTrafficResponse
 	resp, err := p.AkamaiSession.Exec(req, &result)
 	if err != nil {
-		// Reproduce 404 handling logic: if the property doesn't exist, handle it gracefully
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("property %s not found in domain %s", prop, domain)
 		}
@@ -347,7 +344,6 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	// Sort results using the specific Property helper
 	sortPropertyDataRowsByTimestamp(result.DataRows)
 	return &result, nil
 }

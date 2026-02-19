@@ -32,7 +32,7 @@ var (
 )
 
 type LivenessTMeta struct {
-	URI      string `json:"uri"` // Fixed: The old code had a typo `json:uri"`, use `json:"uri"`
+	URI      string `json:"uri"`
 	Domain   string `json:"domain"`
 	Property string `json:"property"`
 	Date     string `json:"date"`
@@ -89,6 +89,7 @@ func NewLivenessTrafficCollector(ctx context.Context, sess session.Session, r *p
 	return &gtmLivenessTrafficExporter
 }
 
+// Summaries map by domain, property, datacenter
 var livenessDurationHistogramMap = make(map[string]map[string]map[int]prometheus.Histogram)
 var livenessErrorsSummaryMap = make(map[string]map[string]map[int]prometheus.Summary)
 
@@ -136,12 +137,13 @@ func (l *GTMLivenessTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
 func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	logrus.Debug("Entering GTM Property Liveness Errors Collect")
 
-	endtime := time.Now().UTC()
+	endtime := time.Now().UTC() // Use same current time for all zones
 
+	// Collect metrics for each domain and liveness
 	for _, domain := range l.GTMConfig.Domains {
 		logrus.Debugf("Processing domain %s", domain.Name)
 		for _, prop := range domain.Liveness {
-			// Restore Original Logic: lasttime + 1 minute
+			// get last timestamp recorded. make sure diff > 5 mins.
 			lasttime := l.LastTimestamp[domain.Name][prop.PropertyName].Add(time.Minute)
 			logrus.Debugf("Fetching liveness errors Report for property %s in domain %s.", prop.PropertyName, domain.Name)
 
@@ -162,7 +164,7 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				continue
 			}
 
-			// Restore Original Logic: Handle Day Boundary Crossing
+			// Handle Day Boundary Crossing
 			if len(livenessTrafficReport.DataRows) < 1 && endtime.Day() != lasttime.Day() {
 				lasttime = lasttime.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
 				livenessTrafficReport, err = l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, lasttime)
@@ -217,31 +219,6 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 						labelVals = append(labelVals, ts)
 					}
 
-					// Restore original help/name logic
-					/*descFail := prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failures"), "Number of datacenter failures (per domain, property, datacenter)", tsLabels, nil)
-						errorsmetric := prometheus.MustNewConstMetric(descFail, prometheus.CounterValue, 1, labelVals...)
-
-						descDur := prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failure_duration"), "Datacenter falure duration (per domain, property, datacenter)", tsLabels, nil)
-						durmetric := prometheus.MustNewConstMetric(descDur, prometheus.GaugeValue, float64(instanceDC.Duration), labelVals...)
-
-						if l.GTMConfig.UseTimestamp != nil && !*l.GTMConfig.UseTimestamp {
-							ch <- errorsmetric
-							ch <- durmetric
-						} else {
-							ch <- prometheus.NewMetricWithTimestamp(instanceTimestamp, errorsmetric)
-							ch <- prometheus.NewMetricWithTimestamp(instanceTimestamp, durmetric)
-						}
-
-						maps := l.getDatacenterHistogramMetrics(domain.Name, prop.PropertyName, instanceDC.DatacenterID)
-						maps["duration"].(prometheus.Histogram).Observe(float64(instanceDC.Duration))
-						maps["errors"].(prometheus.Summary).Observe(float64(1))
-					}
-
-					if instanceTimestamp.After(l.LastTimestamp[domain.Name][prop.PropertyName]) {
-						logrus.Debugf("Updating Last Timestamp from %v TO %v", l.LastTimestamp[domain.Name][prop.PropertyName], instanceTimestamp)
-						l.LastTimestamp[domain.Name][prop.PropertyName] = instanceTimestamp
-					}
-					break*/
 					desc := prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failures"), "Number of datacenter failures (per domain, property, datacenter)", tsLabels, nil)
 					logrus.Debugf("Creating error failures counter metric. Domain: %s, Property: %s, Datacenter: %d, Timestamp: %v", domain.Name, prop.PropertyName, instanceDC.DatacenterID, ts)
 					var errorsmetric, durmetric prometheus.Metric
@@ -252,7 +229,7 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 					} else {
 						ch <- prometheus.NewMetricWithTimestamp(instanceTimestamp, errorsmetric)
 					}
-					desc = prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failure_duration"), "Datacenter falure duration (per domain, property, datacenter)", tsLabels, nil)
+					desc = prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failure_duration"), "Datacenter failure duration (per domain, property, datacenter)", tsLabels, nil)
 					logrus.Debugf("Creating failure duration gauge metric. Domain: %s, Property: %s, Datacenter: %d, Timestamp: %v", domain.Name, prop.PropertyName, instanceDC.DatacenterID, ts)
 					durmetric = prometheus.MustNewConstMetric(
 						desc, prometheus.GaugeValue, float64(instanceDC.Duration), labelVals...)
@@ -282,59 +259,87 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agentID, targetID string, start time.Time) (*LivenessErrorsResponse, error) {
 	qargs := make(map[string]string)
 
-	// 1. Restore Filter Priority and Logging
 	if len(targetID) > 0 {
-		qargs["targetId"] = targetID // Takes priority
+		qargs["targetIp"] = targetID // Takes priority
+		logrus.Info("Target IP Set. Using Target IP.")
 	}
 	if len(agentID) > 0 {
 		if len(targetID) > 0 {
-			logrus.Warn("Both agentId and targetId filters set. Using targetId ONLY")
+			logrus.Warn("Both agentIp and targetIp filters set. Using targetIp ONLY")
 		} else {
-			qargs["agentId"] = agentID
+			qargs["agentIp"] = agentID
+			logrus.Info("Agent IP Set. Using Agent IP.")
 		}
 	}
 
-	// 2. Fetch Window (Handling String to Time conversion)
 	var apiWindow struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 	}
 
 	windowPath := "/gtm-api/v1/reports/liveness-tests/window"
-	windowReq, _ := http.NewRequestWithContext(l.ctx, http.MethodGet, windowPath, nil)
+	windowReq, err := http.NewRequestWithContext(l.ctx, http.MethodGet, windowPath, nil)
+	if err != nil {
+		return nil, err
+	}
 
-	_, err := l.AkamaiSession.Exec(windowReq, &apiWindow)
+	_, err = l.AkamaiSession.Exec(windowReq, &apiWindow)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch liveness window: %w", err)
 	}
 
 	// Convert API strings to time.Time objects
-	windowStart, _ := time.Parse(time.RFC3339, apiWindow.Start)
-	windowEnd, _ := time.Parse(time.RFC3339, apiWindow.End)
-
-	// 3. Date-based Windowing Logic
-	// Note: Liveness reports use "date" (YYYY-MM-DD) instead of start/end range
-	if windowStart.Before(start) {
-		if windowEnd.After(start) {
-			qargs["date"], _ = convertTimeFormat(start, GTMTrafficDateFormat)
-		} else {
-			qargs["date"], _ = convertTimeFormat(windowEnd, GTMTrafficDateFormat)
-		}
-	} else {
-		qargs["date"], _ = convertTimeFormat(windowStart, GTMTrafficDateFormat)
+	windowStart, err := time.Parse(time.RFC3339, apiWindow.Start)
+	if err != nil {
+		return nil, err
+	}
+	windowEnd, err := time.Parse(time.RFC3339, apiWindow.End)
+	if err != nil {
+		return nil, err
 	}
 
-	// 4. Request actual Report
+	if windowStart.Before(start) {
+		if windowEnd.After(start) {
+			qargs["date"], err = convertTimeFormat(start, GTMTrafficDateFormat)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			qargs["date"], err = convertTimeFormat(windowEnd, GTMTrafficDateFormat)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		qargs["date"], err = convertTimeFormat(windowStart, GTMTrafficDateFormat)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	path := fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", domain, prop)
-	req, _ := http.NewRequestWithContext(l.ctx, http.MethodGet, path, nil)
+	req, err := http.NewRequestWithContext(l.ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, ok := qargs["date"]; !ok {
+		return nil, fmt.Errorf("GetLivenessErrorsReport: date parameter is required")
+	}
 
 	q := req.URL.Query()
 	for k, v := range qargs {
-		q.Add(k, v)
+		switch k {
+		case "date":
+			q.Add(k, v)
+		case "agentIp":
+			q.Add(k, v)
+		case "targetIp":
+			q.Add(k, v)
+		}
 	}
 	req.URL.RawQuery = q.Encode()
 
-	// Required for Akamai report parsing parity
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	var result LivenessErrorsResponse

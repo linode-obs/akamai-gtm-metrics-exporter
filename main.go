@@ -85,7 +85,7 @@ func initAkamaiSession(gtmMetricsConfig collectors.GTMMetricsConfig) (session.Se
 
 		config, err = edgegrid.New(options...)
 		if err != nil {
-			return nil, err
+			logrus.Fatalf("No valid Akamai authentication configuration found: %v", err)
 		}
 	}
 
@@ -145,7 +145,7 @@ func main() {
 	// 2. Logging Setup
 	setupLogging(*logLevel, *logFormat)
 
-	// 3. Print Startup Info (Matches old code order)
+	// 3. Print Startup Info
 	logrus.Infof("Config file: %s", *configFile)
 	logrus.Infof("Starting GTM Metrics exporter. %s", version.Info())
 	logrus.Infof("Build context: %s", version.BuildContext())
@@ -163,7 +163,7 @@ func main() {
 		logrus.Fatalf("Error initializing Akamai session: %v", err)
 	}
 
-	// 6. Time Window Calculations (Corrected to match original logic)
+	// 6. Time Window Calculations
 	tstart := time.Now().UTC().Add(-1 * prefillDuration)
 
 	if gtmMetricsConfig.SummaryWindow != "" {

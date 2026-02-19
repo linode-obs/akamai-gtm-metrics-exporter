@@ -82,8 +82,10 @@ func NewDatacenterTrafficCollector(ctx context.Context, sess session.Session, r 
 	return &gtmDatacenterTrafficExporter
 }
 
+// Summaries map by domain and datacenter
 var dcReqSummaryMap = make(map[string]map[int]prometheus.Summary)
 
+// Initialize locally maintained maps. Only use domain and datacenter.
 func createDatacenterMaps(domain string, dc int) prometheus.Summary {
 	dclabel := strconv.Itoa(dc)
 	labels := prometheus.Labels{"domain": domain, "datacenter": dclabel}
@@ -101,22 +103,23 @@ func createDatacenterMaps(domain string, dc int) prometheus.Summary {
 	return dcReqSummaryMap[domain][dc]
 }
 
+// Describe function
 func (d *GTMDatacenterTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- prometheus.NewDesc(d.DCMetricPrefix, "Akamai GTM Datacenter Traffic", nil, nil)
 }
 
+// Collect function
 func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	logrus.Debug("Entering GTM DC Traffic Collect")
 
-	endtime := time.Now().UTC() // Original logic: Use current UTC time
+	endtime := time.Now().UTC() // Use same current time for all zones
 
+	// Collect metrics for each domain and datacenter
 	for _, domain := range d.GTMConfig.Domains {
 		logrus.Debugf("Processing domain %s", domain.Name)
 		for _, dc := range domain.Datacenters {
-			// Restore Original logic: lasttime = last processed + 1 minute
+			// get last timestamp recorded. make sure diff > 5 mins.
 			lasttime := d.LastTimestamp[domain.Name][dc.DatacenterID].Add(time.Minute)
-
-			// Original logic: ensure we are looking at least 5 minutes ahead
 			if endtime.Before(lasttime.Add(time.Minute * 5)) {
 				lasttime = lasttime.Add(time.Minute * 5)
 			}
@@ -125,7 +128,6 @@ func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 			dcTrafficReport, err := d.retrieveDatacenterTraffic(domain.Name, dc.DatacenterID, lasttime, endtime)
 
 			if err != nil {
-				// Checking for 500/400 errors via string check as v12 returns wrapped errors
 				errStr := err.Error()
 				if strings.Contains(errStr, "500") {
 					logrus.Warnf("Unable to get traffic report for datacenter %d. Internal error ... Skipping.", dc.DatacenterID)
@@ -228,7 +230,6 @@ func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, dc int, start, end time.Time) (*DcTrafficResponse, error) {
 	// 1. Get Traffic Window
-	// The API returns strings, so we use a temp struct to handle the RFC3339 conversion
 	var apiWindow struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
@@ -245,26 +246,38 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 	}
 
 	// Convert strings to time.Time to match old WindowResponse logic
-	startTime, _ := time.Parse(time.RFC3339, apiWindow.Start)
-	endTime, _ := time.Parse(time.RFC3339, apiWindow.End)
+	startTime, err := time.Parse(time.RFC3339, apiWindow.Start)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start time format from API (%s): %w", apiWindow.Start, err)
+	}
+	endTime, err := time.Parse(time.RFC3339, apiWindow.End)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end time format from API (%s): %w", apiWindow.End, err)
+	}
 
 	// 2. Original Boundary Logic
 	qargs := make(map[string]string)
 
 	if startTime.Before(start) {
 		if endTime.After(start) {
-			qargs["start"], _ = convertTimeFormat(start, time.RFC3339)
+			qargs["start"], err = convertTimeFormat(start, time.RFC3339)
 		} else {
-			qargs["start"], _ = convertTimeFormat(endTime, time.RFC3339)
+			qargs["start"], err = convertTimeFormat(endTime, time.RFC3339)
 		}
 	} else {
-		qargs["start"], _ = convertTimeFormat(startTime, time.RFC3339)
+		qargs["start"], err = convertTimeFormat(startTime, time.RFC3339)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	if endTime.Before(end) {
-		qargs["end"], _ = convertTimeFormat(endTime, time.RFC3339)
+		qargs["end"], err = convertTimeFormat(endTime, time.RFC3339)
 	} else {
-		qargs["end"], _ = convertTimeFormat(end, time.RFC3339)
+		qargs["end"], err = convertTimeFormat(end, time.RFC3339)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	// Window validation check
@@ -282,13 +295,11 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 	q.Add("end", qargs["end"])
 	req.URL.RawQuery = q.Encode()
 
-	// Akamai APIs for reports sometimes prefer this header for encoded query params
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	var result DcTrafficResponse
 	resp, err := d.AkamaiSession.Exec(req, &result)
 	if err != nil {
-		// Handle 404 specifically to match old 'configgtm.CommonError' logic
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("datacenter %d not found in domain %s", dc, domain)
 		}
