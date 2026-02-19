@@ -2,6 +2,7 @@
 * Upgraded the plugin to use Akamai Edgegrid v12
 * Upgraded the plugin to use latest Prometheus Go libraries
 * Added support for darwin/arm64
+* Corrected targetId and agentId to targetIp and agentIp respectively
 
 ## 0.1.0 / 2021-01-31
 
