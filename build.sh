@@ -10,7 +10,6 @@ if [[ -z "$VERSION" ]]; then
     exit 1
 fi
 
-
 PLATFORMS=(
     "linux/amd64"
     "linux/386"
@@ -24,10 +23,10 @@ PLATFORMS=(
     "linux/ppc64le"
     "linux/s390x"
     "openbsd/amd64"
-    "windows/amd64"
-    "windows/386"
     "darwin/arm64"
     "darwin/amd64"
+    "netbsd/amd64"
+    "netbsd/386"
 )
 
 mkdir -p build
