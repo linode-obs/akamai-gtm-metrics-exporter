@@ -74,7 +74,7 @@ The exporter requires Akamai Open Edgegrid credentials to configure the GTM API 
 ### Configuration file
 
 Configuration for the GTM exporter is usually done in a file in the working directory (e.g., `./gtm_metrics_example_config.yml`). An example can be found in
-[gtm_metrics_example_config.yml](https://github.com/akamai/akamai-gtm-metrics-exporter/gtm_metrics_example_config.yml). This configuration file may contain the following settings.
+[gtm_metrics_example_config.yml](gtm_metrics_example_config.yml). This configuration file may contain the following settings.
 
 Configuration element | Description
 --------------------- | -----------
@@ -390,7 +390,7 @@ A side effect of configuring the `prefill_window` to be greater than the current
 
 ## Post processing metrics
 
-Post processing of collected metrics may be designed in order to perform additional analysis of collected traffic data or detect abnormalities in the collected data. Post processing is done on the Prometheus server. The rules executed to accomplish this post processing are specified in the Prometheus server configuration file in the rules-files section. An example rules definition file, [example_gtm_metrics_alerts.rules](https://github.com/akamai/akamai-gtm-metrics-exporter/blob/master/example_gtm_metrics_alerts.rules), defines recording rules to prepare for excessive datacenter requests detection in an interval and detection of datacenter failure durations greater than 30 minutes. Snippets of the example rules file configuration that define additional metrics and the expressions to produce the metrics:
+Post processing of collected metrics may be designed in order to perform additional analysis of collected traffic data or detect abnormalities in the collected data. Post processing is done on the Prometheus server. The rules executed to accomplish this post processing are specified in the Prometheus server configuration file in the rules-files section. An example rules definition file, [example_gtm_metrics_alerts.rules](example_gtm_metrics_alerts.rules), defines recording rules to prepare for excessive datacenter requests detection in an interval and detection of datacenter failure durations greater than 30 minutes. Snippets of the example rules file configuration that define additional metrics and the expressions to produce the metrics:
 
 ```
   - name: gtm_datacenter_requests_over_example
@@ -419,7 +419,7 @@ These newly generated metrics can be viewed on a graph or built upon, as in the 
 
 ## Alerting on metrics
 
-To detect and alert on an event or abnormality, two actions must be taken. First, an alert rule must be defined that will detect the activity of interest and generate the alert. The rules example defined in [example_gtm_metrics_alerts.rules](https://github.com/akamai/akamai-gtm-metrics-exporter/blob/master/example_gtm_metrics_alerts.rules) provides first steps to define alerts and configure the alert manager.
+To detect and alert on an event or abnormality, two actions must be taken. First, an alert rule must be defined that will detect the activity of interest and generate the alert. The rules example defined in [example_gtm_metrics_alerts.rules](example_gtm_metrics_alerts.rules) provides first steps to define alerts and configure the alert manager.
 
 Two snippets from the rules file present alert rules that check whether the number of interval datacenter requests exceeds a threshhold and if any test durations exceeds 30 minutes:
 
@@ -447,7 +447,7 @@ Two snippets from the rules file present alert rules that check whether the numb
 
 The second step is to configure the AlertManager, e.g. the receiver of the alert, to pick up the alert (based on specified criteria) and propagate it accordingly.
 
-[example_alertmanager_gtm_metrics.yml](https://github.com/akamai/akamai-gtm-metrics-exporter/blob/master/example_alertmanager_gtm_metrics.yml) is a simple, example alertmanager configuration to receive alerts and propagate them via email.
+[example_alertmanager_gtm_metrics.yml](example_alertmanager_gtm_metrics.yml) is a simple, example alertmanager configuration to receive alerts and propagate them via email.
 
 ## Troubleshooting
 
