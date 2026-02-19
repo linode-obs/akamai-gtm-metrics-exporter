@@ -1,6 +1,6 @@
 # akamai-gtm-metrics-exporter
 
-This technical preview of the Prometheus Akamai Global Traffic Management (GTM) Metrics Exporter publishes Akamai GTM [Traffic and Liveness Report](https://developer.akamai.com/api/web_performance/global_traffic_management_reporting/v1.html) data as `up` metrics. With GTM metrics, Prometheus can track GTM property and datacenter request traffic, as well as property liveness errors. Alerts can also be triggered utilizing generated metrics; e.g., Domain datacenter requests exceeding a threshhold or the number of liveness test failures for a property exceeding a threshhold.
+The Prometheus Akamai Global Traffic Management (GTM) Metrics Exporter publishes Akamai GTM [Traffic and Liveness Report](https://developer.akamai.com/api/web_performance/global_traffic_management_reporting/v1.html) data as `up` metrics. With GTM metrics, Prometheus can track GTM property and datacenter request traffic, as well as property liveness errors. Alerts can also be triggered utilizing generated metrics; e.g., Domain datacenter requests exceeding a threshhold or the number of liveness test failures for a property exceeding a threshhold.
 
 ## Getting Started
 
@@ -117,7 +117,7 @@ Note: targets point to GTM Exporters.
 ## Run the binary
 
 ```bash
-./akamai-gtm-metrics-exporter
+./akamai-gtm-metrics-exporter --config.file=gtm_config.yml
 ```
 
 In the log, the exporter will publish a series of INFO messages to show normal operation. Look for the `Beginning to serve on address:` message to learn its port.
@@ -313,7 +313,7 @@ akamai_gtm_datacenter_traffic_requests_per_interval_summary_count{datacenter="31
 # HELP akamai_gtm_metrics_exporter_build_info A metric with a constant '1' value labeled by version, revision, branch, and goversion from which akamai_gtm_metrics_exporter was built.
 # TYPE akamai_gtm_metrics_exporter_build_info gauge
 akamai_gtm_metrics_exporter_build_info{branch="",goversion="go1.25.5",revision="",version=""} 1
-# HELP akamai_gtm_property_liveness_errors_datacenter_failure_duration Datacenter falure duration (per domain, property, datacenter)
+# HELP akamai_gtm_property_liveness_errors_datacenter_failure_duration Datacenter failure duration (per domain, property, datacenter)
 # TYPE akamai_gtm_property_liveness_errors_datacenter_failure_duration gauge
 akamai_gtm_property_liveness_errors_datacenter_failure_duration{datacenter="3201",domain="test.akadns.net",property="testprop"} 0
 # HELP akamai_gtm_property_liveness_errors_datacenter_failures Number of datacenter failures (per domain, property, datacenter)
@@ -364,7 +364,7 @@ Changing the advanced configuration defaults, though, comes with associated Prom
 
 #### `timestamp_label` behavior notes
 
-Adding a timestamp label maybe helpful in knowing the actual time and day that the event. Adding a timestamp label to each metric time series has the side effect of creating a distinct series for each label/timestamp combination. When retrieving metrics, it is recommended to use only the desired labels in the query expression. The legend displayed when viewing graphs through the Prometheus portal will contain all generated series; hundreds per day. Other viewing applications, e.g. Grafana, will allow graph customization and reduced screen clutter. 
+Adding a timestamp label maybe helpful in knowing the actual time and day of the event. Adding a timestamp label to each metric time series has the side effect of creating a distinct series for each label/timestamp combination. When retrieving metrics, it is recommended to use only the desired labels in the query expression. The legend displayed when viewing graphs through the Prometheus portal will contain all generated series; hundreds per day. Other viewing applications, e.g. Grafana, will allow graph customization and reduced screen clutter. 
 
 The table tab in the Prometheus portal may provide a more manageable means to view metrics with a timestamp label. For example by only retrieving the last five (5) minutes of collected metrics; e.g. `akamai_gtm_datacenter_traffic_requests_per_interval{datacenter="3131",domain="testdomain.akadns.net",property="testprop"}[5m]`.
 
@@ -487,4 +487,4 @@ If using a docker image for the GTM exporter, Prometheus might need to explicitl
 
 ## License
 
-Apache License 2.0, see [LICENSE](https://github.com/akamai/akamai-gtm-metrics-exporter/master/LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE).
