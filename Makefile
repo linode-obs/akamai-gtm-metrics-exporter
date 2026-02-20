@@ -11,92 +11,55 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Ensure that 'all' is the default target otherwise it will be the first target from Makefile.common.
+# Ensure that 'all' is the default target
 all::
 
-# 1. PLATFORM DETECTION (Must be at the top)
-DETECTED_OS   := $(shell uname -s | tr '[:upper:]' '[:lower:]')
-DETECTED_ARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+# 1. CONFIGURATION
+DOCKER_REPO             ?= akamai
+DOCKER_IMAGE_NAME       ?= akamai-gtm-metrics-exporter
+# Add any additional architectures you want to support here
+DOCKER_ARCHS            ?= amd64 arm64
 
-# 2. CONFIGURATION & DEFAULTS
-DOCKER_REPO       ?= akamai
-DOCKER_IMAGE_NAME ?= akamai-gtm-metrics-exporter
-# These defaults ensure ARCH and OS are never empty
-OS   ?= $(GOOS)
-ARCH ?= $(GOARCH)
-
-OS   ?= $(DETECTED_OS)
-ARCH ?= $(DETECTED_ARCH)
-
-
+# Maintain your specific tool versions
 PROMTOOL_VERSION ?= 3.9.1
-PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
 PROMTOOL         ?= $(FIRST_GOPATH)/bin/promtool
+# Note: GO_BUILD_PLATFORM is provided by Makefile.common
+PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
 
-# 3. INCLUDE SHARED LOGIC
+# 2. INCLUDE SHARED LOGIC
 include Makefile.common
 
-# 4. OVERRIDE DOCKER TARGETS
-# redfine common-docker to use buildx and prevent "DEPRECATED" warnings
-.PHONY: common-docker
-common-docker: $(BUILD_DOCKER_ARCHS)
+# 3. DOCKER OVERRIDES (Using buildx to avoid warnings)
+.PHONY: buildx-docker
+buildx-docker: $(addprefix buildx-docker-,$(DOCKER_ARCHS))
 
-$(BUILD_DOCKER_ARCHS): common-docker-%:
+$(addprefix buildx-docker-,$(DOCKER_ARCHS)): buildx-docker-%:
 	@echo ">> building for linux/$* using modern buildx"
 	docker buildx build \
 		--platform "linux/$*" \
-		-t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:$(DOCKER_IMAGE_TAG)" \
-		-f $(DOCKERFILE_PATH) \
+		-t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:$(SANITIZED_DOCKER_IMAGE_TAG)" \
+		-f Dockerfile \
 		--build-arg ARCH="$*" \
 		--build-arg OS="linux" \
 		--load \
 		$(DOCKERBUILD_CONTEXT)
 
-# Local convenience target for your current machine
+# Local convenience target (keeps your original workflow)
 .PHONY: docker
 docker:
-	@echo ">> building docker image for linux/$(ARCH) using buildx"
+	@echo ">> building docker image for linux/$(GOHOSTARCH) using buildx"
 	docker buildx build \
-		--platform "linux/$(ARCH)" \
-		-t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$(ARCH):gtm-metrics-exporter" \
+		--platform "linux/$(GOHOSTARCH)" \
+		-t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$(GOHOSTARCH):$(SANITIZED_DOCKER_IMAGE_TAG)" \
 		-f ./Dockerfile \
-		--build-arg ARCH=$(ARCH) \
+		--build-arg ARCH=$(GOHOSTARCH) \
 		--build-arg OS="linux" \
 		--load \
 		./
 
-# 5. TOOLS & LINTING
-STATICCHECK_IGNORE =
-
-# Use CGO for non-Linux builds.
-ifeq ($(OS), linux)
-    PROMU_CONF ?= .promu.yml
-else
-    ifndef OS
-        ifeq ($(GOHOSTOS), linux)
-            PROMU_CONF ?= .promu.yml
-        else
-            PROMU_CONF ?= .promu-cgo.yml
-        endif
-    else
-        ifeq ($(OS), openbsd)
-            ifeq ($(ARCH), amd64)
-                PROMU_CONF ?= .promu.yml
-            else
-                PROMU_CONF ?= .promu-cgo.yml
-            endif
-        else
-            PROMU_CONF ?= .promu-cgo.yml
-        endif
-    endif
-endif
-
-PROMU := $(FIRST_GOPATH)/bin/promu --config $(PROMU_CONF)
-
-$(eval $(call goarch_pair,amd64,386))
-$(eval $(call goarch_pair,arm64,armv7))
-$(eval $(call goarch_pair,mips64,mips))
-$(eval $(call goarch_pair,mips64el,mipsel))
+# 4. CUSTOM TARGETS & WRAPPERS
+.PHONY: build
+build: common-build
 
 .PHONY: all
 all:: precheck style check_license lint build
@@ -107,11 +70,6 @@ unused:
 
 .PHONY: promtool
 promtool: $(PROMTOOL)
-
-.PHONY: release-build
-release-build:
-	@echo ">> release build for $(OS)/$(ARCH)"
-	$(MAKE) build
 
 $(PROMTOOL):
 	@echo ">> downloading promtool v$(PROMTOOL_VERSION)"

@@ -30,11 +30,57 @@ var (
 	gtmPropertyTrafficExporter GTMPropertyTrafficExporter
 )
 
+// --- Property Traffic Structs ---
+
+type PropertyTrafficResponse struct {
+	Metadata    PropertyTMeta          `json:"metadata"`
+	DataRows    []*PropertyTrafficData `json:"dataRows"`
+	DataSummary interface{}            `json:"dataSummary"` // Added for parity
+	Links       []interface{}          `json:"links"`
+}
+
+type PropertyTrafficData struct {
+	Timestamp   string            `json:"timestamp"`
+	Datacenters []*PropertyDCData `json:"datacenters"` // Changed to pointer slice
+}
+
+type PropertyDCData struct {
+	Nickname          string `json:"nickname"`
+	DatacenterId      int    `json:"datacenterId"`
+	TrafficTargetName string `json:"trafficTargetName"`
+	Requests          int64  `json:"requests"`
+	Status            string `json:"status"` // Added missing field
+}
+
+// --- Liveness/Errors Structs ---
+
+type LivenessErrorsResponse struct {
+	Metadata    *LivenessTMeta   `json:"metadata"`
+	DataRows    []*LivenessTData `json:"dataRows"`
+	DataSummary interface{}      `json:"dataSummary"`
+	Links       []interface{}    `json:"links"`
+}
+
+type LivenessTData struct {
+	Timestamp   string          `json:"timestamp"`
+	Datacenters []*LivenessDRow `json:"datacenters"`
+}
+
+// Ensure your LivenessDRow and Metadata structs look like this:
+type PropertyTMeta struct {
+	URI      string `json:"uri"`
+	Domain   string `json:"domain"`
+	Interval string `json:"interval,omitempty"`
+	Property string `json:"property"`
+	Start    string `json:"start"`
+	End      string `json:"end"`
+}
+
 type GTMPropertyTrafficExporter struct {
 	GTMConfig                GTMMetricsConfig
 	PropertyMetricPrefix     string
 	PropertyLookbackDuration time.Duration
-	LastTimestamp            map[string]map[string]time.Time
+	LastTimestamp            map[string]map[string]time.Time // index by domain, property
 	PropertyRegistry         *prometheus.Registry
 	AkamaiSession            session.Session
 	ctx                      context.Context
@@ -49,9 +95,9 @@ func NewPropertyTrafficCollector(ctx context.Context, sess session.Session, r *p
 		ctx:                      ctx,
 	}
 	gtmPropertyTrafficExporter.PropertyMetricPrefix = gtmMetricPrefix + "property_traffic"
+	gtmPropertyTrafficExporter.PropertyLookbackDuration = lookbackDuration
 	gtmPropertyTrafficExporter.PropertyRegistry = r
 
-	// Populate LastTimestamp per domain, property. Start time applies to all.
 	domainMap := make(map[string]map[string]time.Time)
 	for _, domain := range gtmMetricsConfig.Domains {
 		propertyReqSummaryMap[domain.Name] = make(map[string]prometheus.Summary)
@@ -69,12 +115,9 @@ func NewPropertyTrafficCollector(ctx context.Context, sess session.Session, r *p
 	return &gtmPropertyTrafficExporter
 }
 
-// Summaries map by domain and property
 var propertyReqSummaryMap = make(map[string]map[string]prometheus.Summary)
 
-// Initialize locally maintained maps. Only use domain and property.
 func createPropertyMaps(domain, prop string) prometheus.Summary {
-
 	labels := prometheus.Labels{"domain": domain, "property": prop}
 
 	propertyReqSummaryMap[domain][prop] = prometheus.NewSummary(
@@ -90,51 +133,42 @@ func createPropertyMaps(domain, prop string) prometheus.Summary {
 	return propertyReqSummaryMap[domain][prop]
 }
 
-// Describe function
 func (p *GTMPropertyTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
-
 	ch <- prometheus.NewDesc(p.PropertyMetricPrefix, "Akamai GTM Property Traffic", nil, nil)
 }
 
-// Collect function
 func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
-	logrus.Debugf("Entering GTM Property Traffic Collect")
+	logrus.Debug("Entering GTM Property Traffic Collect")
+
+	endtime := time.Now().UTC()
 
 	for _, domain := range p.GTMConfig.Domains {
 		logrus.Debugf("Processing domain %s", domain.Name)
 		for _, prop := range domain.Properties {
-
-			nextIntervalStart := p.LastTimestamp[domain.Name][prop.Name].Add(5 * time.Minute)
-
-			safeNow := time.Now().UTC().Add(-15 * time.Minute)
-
-			if nextIntervalStart.After(safeNow) {
-				logrus.Debugf("Property %s next interval %v is too recent (SafeNow: %v). Skipping.", prop.Name, nextIntervalStart, safeNow)
-				continue
+			// Restore Original Logic: lasttime + 1 minute, ensuring 5min buffer
+			lasttime := p.LastTimestamp[domain.Name][prop.Name].Add(time.Minute)
+			if endtime.Before(lasttime.Add(time.Minute * 5)) {
+				lasttime = lasttime.Add(time.Minute * 5)
 			}
 
-			targetEnd := nextIntervalStart.Add(5 * time.Minute)
+			logrus.Debugf("Fetching property Report for property %s in domain %s.", prop.Name, domain.Name)
+			propertyTrafficReport, err := p.retrievePropertyTraffic(domain.Name, prop.Name, lasttime, endtime)
 
-			logrus.Debugf("Fetching property Report for %s in domain %s (Window: %v to %v)", prop.Name, domain.Name, nextIntervalStart, targetEnd)
-
-			propertyTrafficReport, err := p.retrievePropertyTraffic(domain.Name, prop.Name, nextIntervalStart, targetEnd)
 			if err != nil {
-				if strings.Contains(err.Error(), "status: 500") {
-					logrus.Warnf("Internal error for property %s. Skipping.", prop.Name)
+				errStr := err.Error()
+				if strings.Contains(errStr, "500") {
+					logrus.Warnf("Unable to get traffic report for property %s. Internal error ... Skipping.", prop.Name)
 					continue
 				}
-				logrus.Errorf("Unable to get traffic report for property %s. Error: %s", prop.Name, err.Error())
+				if strings.Contains(errStr, "400") {
+					logrus.Warnf("Unable to get traffic report for property %s. Skipping. Error: %s", prop.Name, errStr)
+					logrus.Errorf("%s", err.Error())
+					continue
+				}
+				logrus.Errorf("Unable to get traffic report for property %s ... Skipping. Error: %s", prop.Name, errStr)
 				continue
 			}
-
 			logrus.Debugf("Traffic Metadata: [%v]", propertyTrafficReport.Metadata)
-
-			if len(propertyTrafficReport.DataRows) == 0 {
-				logrus.Debugf("No traffic found for %s in window. Advancing timestamp.", prop.Name)
-				p.LastTimestamp[domain.Name][prop.Name] = nextIntervalStart
-				continue
-			}
-
 			for _, reportInstance := range propertyTrafficReport.DataRows {
 				instanceTimestamp, err := parseTimeString(reportInstance.Timestamp, GTMTrafficLongTimeFormat)
 				if err != nil {
@@ -143,7 +177,15 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				}
 
 				if !instanceTimestamp.After(p.LastTimestamp[domain.Name][prop.Name]) {
+					logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", instanceTimestamp, p.LastTimestamp[domain.Name][prop.Name])
+					logrus.Warnf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
 					continue
+				}
+
+				// Check for missing intervals
+				logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", instanceTimestamp, p.LastTimestamp[domain.Name][prop.Name])
+				if instanceTimestamp.After(p.LastTimestamp[domain.Name][prop.Name].Add(time.Minute * (trafficReportInterval + 1))) {
+					logrus.Warnf("Missing report interval. Current: %v, Last: %v", instanceTimestamp, p.LastTimestamp[domain.Name][prop.Name])
 				}
 
 				var aggReqs int64
@@ -152,7 +194,6 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				for _, instanceDC := range reportInstance.Datacenters {
 					aggReqs += instanceDC.Requests
 
-					// Filter and emit per-datacenter/target metrics if configured
 					if len(prop.DatacenterIDs) > 0 || len(prop.DCNicknames) > 0 || len(prop.Targets) > 0 {
 						var tsLabels []string
 						var filterVal string
@@ -177,7 +218,7 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 								tsLabels = append(tsLabels, "interval_timestamp")
 							}
 							ts := instanceTimestamp.Format(time.RFC3339)
-							desc := prometheus.NewDesc(prometheus.BuildFQName(p.PropertyMetricPrefix, "", "requests_per_interval"), "Number of property requests per 5 minute interval", tsLabels, nil)
+							desc := prometheus.NewDesc(prometheus.BuildFQName(p.PropertyMetricPrefix, "", "requests_per_interval"), "Number of property requests per 5 minute interval (per domain)", tsLabels, nil)
 
 							var reqsmetric prometheus.Metric
 							if p.GTMConfig.TSLabel {
@@ -195,15 +236,14 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 					}
 				}
 
-				// Emit aggregate metric if no specific filters were applied
 				if len(prop.DatacenterIDs) < 1 && len(prop.DCNicknames) < 1 && len(prop.Targets) < 1 {
 					tsLabels := baseLabels
 					if p.GTMConfig.TSLabel {
 						tsLabels = append(tsLabels, "interval_timestamp")
 					}
 					ts := instanceTimestamp.Format(time.RFC3339)
-					desc := prometheus.NewDesc(prometheus.BuildFQName(p.PropertyMetricPrefix, "", "requests_per_interval"), "Number of property requests per 5 minute interval", tsLabels, nil)
-
+					desc := prometheus.NewDesc(prometheus.BuildFQName(p.PropertyMetricPrefix, "", "requests_per_interval"), "Number of property requests per 5 minute interval (per domain)", tsLabels, nil)
+					logrus.Debugf("Creating Requests metric. Domain: %s, Property: %s, Requests: %v, Timestamp: %v", domain.Name, prop.Name, float64(aggReqs), ts)
 					var reqsmetric prometheus.Metric
 					if p.GTMConfig.TSLabel {
 						reqsmetric = prometheus.MustNewConstMetric(desc, prometheus.GaugeValue, float64(aggReqs), domain.Name, prop.Name, ts)
@@ -218,11 +258,12 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 					}
 				}
 
-				// Update Summary and last timestamp
 				propertyReqSummaryMap[domain.Name][prop.Name].Observe(float64(aggReqs))
-				p.LastTimestamp[domain.Name][prop.Name] = instanceTimestamp
 
-				// Break to process exactly one interval per scrape
+				if instanceTimestamp.After(p.LastTimestamp[domain.Name][prop.Name]) {
+					logrus.Debugf("Updating Last Timestamp from %v TO %v", p.LastTimestamp[domain.Name][prop.Name], instanceTimestamp)
+					p.LastTimestamp[domain.Name][prop.Name] = instanceTimestamp
+				}
 				break
 			}
 		}
@@ -230,69 +271,79 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string, start, end time.Time) (*PropertyTrafficResponse, error) {
-	// Get the valid Traffic Window for Properties
-	windowPath := "/gtm-api/v1/reports/traffic/properties-window"
-	windowReq, err := http.NewRequest(http.MethodGet, windowPath, nil)
-	if err != nil {
-		return nil, err
+	var apiWindow struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
 	}
 
-	var window WindowResponse
-	_, err = p.AkamaiSession.Exec(windowReq, &window)
+	windowPath := "/gtm-api/v1/reports/traffic/properties-window"
+	windowReq, _ := http.NewRequestWithContext(p.ctx, http.MethodGet, windowPath, nil)
+
+	_, err := p.AkamaiSession.Exec(windowReq, &apiWindow)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch property traffic window: %w", err)
 	}
 
-	// Ensure the window isn't zero/unparsed
-	if window.EndTime.IsZero() || window.EndTime.Year() < 2000 {
-		logrus.Warnf("Property window for %s returned invalid dates. Using 48h fallback.", prop)
-		window.EndTime = ceilToGTMInterval(time.Now().UTC())
-		window.StartTime = floorToGTMInterval(window.EndTime.Add(-48 * time.Hour))
+	windowStart, err := time.Parse(time.RFC3339, apiWindow.Start)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start time format from API (%s): %w", apiWindow.Start, err)
+	}
+	windowEnd, err := time.Parse(time.RFC3339, apiWindow.End)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end time format from API (%s): %w", apiWindow.End, err)
 	}
 
-	qargsStart := floorToGTMInterval(start)
-	qargsEnd := ceilToGTMInterval(end)
+	qargs := make(map[string]string)
 
-	maxAllowed := floorToGTMInterval(time.Now().UTC().Add(-15 * time.Minute))
-	if qargsEnd.After(maxAllowed) {
-		qargsEnd = maxAllowed
+	if windowStart.Before(start) {
+		if windowEnd.After(start) {
+			qargs["start"], err = convertTimeFormat(start, time.RFC3339)
+		} else {
+			qargs["start"], err = convertTimeFormat(windowEnd, time.RFC3339)
+		}
+	} else {
+		qargs["start"], err = convertTimeFormat(windowStart, time.RFC3339)
 	}
-
-	if qargsStart.Before(window.StartTime) {
-		qargsStart = window.StartTime
+	if err != nil {
+		return nil, err
 	}
-	if qargsEnd.After(window.EndTime) {
-		qargsEnd = window.EndTime
+	if windowEnd.Before(end) {
+		qargs["end"], err = convertTimeFormat(windowEnd, time.RFC3339)
+	} else {
+		qargs["end"], err = convertTimeFormat(end, time.RFC3339)
 	}
-
-	if qargsStart.After(qargsEnd) || qargsStart.Equal(qargsEnd) {
-		logrus.Warnf("Start/End time outside valid property window for %s. Skipping.", prop)
-		return &PropertyTrafficResponse{DataRows: []*PropertyTrafficData{}}, nil
-	}
-
-	// Request actual Traffic Data
-	path := fmt.Sprintf("/gtm-api/v1/reports/traffic/domains/%s/properties/%s", domain, prop)
-	req, err := http.NewRequest(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
 
+	if qargs["start"] >= qargs["end"] {
+		logrus.Warnf("Start or End time outside valid property window for %s. Skipping.", prop)
+		return &PropertyTrafficResponse{DataRows: []*PropertyTrafficData{}}, nil
+	}
+
+	path := fmt.Sprintf("/gtm-api/v1/reports/traffic/domains/%s/properties/%s", domain, prop)
+	req, _ := http.NewRequestWithContext(p.ctx, http.MethodGet, path, nil)
+
 	q := req.URL.Query()
-	q.Add("start", qargsStart.Truncate(time.Second).Format(time.RFC3339))
-	q.Add("end", qargsEnd.Truncate(time.Second).Format(time.RFC3339))
+	q.Add("start", qargs["start"])
+	q.Add("end", qargs["end"])
 	req.URL.RawQuery = q.Encode()
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	var result PropertyTrafficResponse
 	resp, err := p.AkamaiSession.Exec(req, &result)
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("property %s not found in domain %s", prop, domain)
+		}
 		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	// Sort results (using the helper for PropertyTrafficData)
 	sortPropertyDataRowsByTimestamp(result.DataRows)
 	return &result, nil
 }

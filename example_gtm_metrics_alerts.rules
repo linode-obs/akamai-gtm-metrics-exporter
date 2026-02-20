@@ -27,7 +27,7 @@ groups:
         annotations:
           summary: "Datacenter requests exceeded Rolling average * 2"
           description: "Job: {{ $labels.job }} Instance: {{ $labels.instance }} has Datacenter request count (current value: {{ $value }}s) compared to rolling average"
-  # Datacenter total duration falures
+  # Datacenter total duration failures
   - name: gtm_datacenter_duration_over_example
     rules:
       - record: instance_datacenter:akamai_gtm_property_liveness_errors_duration_per_datacenter_histogram_bucket:sub

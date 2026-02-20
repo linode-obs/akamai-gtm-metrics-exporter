@@ -15,7 +15,6 @@ package collectors
 
 import (
 	"errors"
-
 	"github.com/sirupsen/logrus"
 )
 
