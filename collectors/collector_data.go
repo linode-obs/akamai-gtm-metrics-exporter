@@ -15,7 +15,7 @@ package collectors
 
 import (
 	"errors"
-	"github.com/prometheus/common/log"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -34,7 +34,7 @@ var (
 		Targets:       make([]string, 0),
 	}
 	DefaultDomainTraffic = DomainTraffic{
-		Properties:  make([]*TrafficPropertyConfig,0),
+		Properties:  make([]*TrafficPropertyConfig, 0),
 		Datacenters: make([]*TrafficDatacenterConfig, 0),
 		Liveness:    make([]*LivenessTestConfig, 0),
 	}
@@ -54,7 +54,7 @@ func (c *DomainTraffic) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if err := unmarshal((*plain)(c)); err != nil {
 		return err
 	}
-	log.Debugf("Domain: [%v]", *c)
+	logrus.Debugf("Domain: [%v]", *c)
 	if c.Name == "" {
 		return errors.New("required domain name is empty")
 	}
@@ -79,7 +79,7 @@ func (p *TrafficPropertyConfig) UnmarshalYAML(unmarshal func(interface{}) error)
 	if err := unmarshal((*plain)(p)); err != nil {
 		return err
 	}
-	log.Debugf("Property: [%v]", *p)
+	logrus.Debugf("Property: [%v]", *p)
 	if p.Name == "" {
 		return errors.New("required property name is empty")
 	}
@@ -99,7 +99,7 @@ func (d *TrafficDatacenterConfig) UnmarshalYAML(unmarshal func(interface{}) erro
 	if err := unmarshal((*plain)(d)); err != nil {
 		return err
 	}
-	log.Debugf("Datacenter: [%v]", *d)
+	logrus.Debugf("Datacenter: [%v]", *d)
 	if d.DatacenterID == 0 {
 		return errors.New("required datacenter id is not set")
 	}
@@ -122,7 +122,7 @@ func (p *LivenessTestConfig) UnmarshalYAML(unmarshal func(interface{}) error) er
 	if err := unmarshal((*plain)(p)); err != nil {
 		return err
 	}
-	log.Debugf("Liveness test: [%v]", *p)
+	logrus.Debugf("Liveness test: [%v]", *p)
 	if p.PropertyName == "" {
 		return errors.New("required property name is empty")
 	}

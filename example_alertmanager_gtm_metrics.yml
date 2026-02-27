@@ -1,4 +1,4 @@
-# Edge DNS Traffic Example AlertManager Configuration
+# GTM Traffic Example AlertManager Configuration
 # This simple configuration example pairs with the accompanying
 # example_edgedns_traffic_alerts.rules, generating an email alert
 global:

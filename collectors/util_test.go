@@ -15,89 +15,87 @@ package collectors
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"gopkg.in/h2non/gock.v1"
 	"testing"
 
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
+	"github.com/stretchr/testify/assert"
+	"gopkg.in/h2non/gock.v1"
 )
 
-var (
-	config = edgegrid.Config{
-		Host:         "akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/",
-		AccessToken:  "akab-access-token-xxx-xxxxxxxxxxxxxxxx",
+func mockV12Session() session.Session {
+	config := &edgegrid.Config{
+		Host:         "akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net",
 		ClientToken:  "akab-client-token-xxx-xxxxxxxxxxxxxxxx",
 		ClientSecret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=",
-		MaxBody:      2048,
-		Debug:        false,
+		AccessToken:  "akab-access-token-xxx-xxxxxxxxxxxxxxxx",
 	}
-)
 
+	// session.New takes the config and returns (Session, error)
+	sess, err := session.New(session.WithSigner(config))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create mock session: %v", err))
+	}
+
+	return sess
+}
 func TestGetTrafficReport(t *testing.T) {
-	//(zone string, trafficReportQueryArgs *TrafficReportQueryArgs) (TrafficRecordsResponse, error)
-
 	dnsTestDomain := "testdomain.com.akadns.net"
 	dnsTestProperty := "testprop"
 	queryargs := map[string]string{"date": "2016/11/23"}
 
+	sess := mockV12Session()
+
 	defer gock.Off()
-	mock := gock.New(fmt.Sprintf("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", dnsTestDomain, dnsTestProperty))
+	mock := gock.New("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net")
 	mock.
 		Get(fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", dnsTestDomain, dnsTestProperty)).
-		HeaderPresent("Authorization").
+		MatchParam("date", "2016/11/23").
 		Reply(200).
 		BodyString(`{
-    			"metadata": {
-        			"date": "2016-11-23",
-        			"domain": "example.akadns.net",
-        			"property": "www",
-        		"uri": "https://akab-xxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx.luna.akamaiapis.net/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2016-11-23"
-    			},
-    			"dataRows": [ {
-            			"timestamp": "2016-11-23T00:13:23Z",
-            			"datacenters": [ {
-                    			"datacenterId": 3201,
-                    			"agentIp": "204.1.136.239",
-                    			"testName": "Our defences",
-                    			"errorCode": 3101,
-                    			"duration": 0,
-                    			"nickname": "Winterfell",
-                    			"trafficTargetName": "Winterfell - 1.2.3.4",
-                    			"targetIp": "1.2.3.4"
-                		} ]
-        		} ],
-    			"links": [ {
-            			"rel": "self",
-            			"href": "https://akab-xxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx.luna.akamaiapis.net/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2016-11-23"
-        		} ]
-		}`)
+                "metadata": {
+                    "date": "2016-11-23",
+                    "domain": "example.akadns.net",
+                    "property": "www",
+                "uri": "https://akab-xxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx.luna.akamaiapis.net/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2016-11-23"
+                },
+                "dataRows": [ {
+                        "timestamp": "2016-11-23T00:13:23Z",
+                        "datacenters": [ {
+                                "datacenterId": 3201,
+                                "agentIp": "204.1.136.239",
+                                "testName": "Our defences",
+                                "errorCode": 3101,
+                                "duration": 0,
+                                "nickname": "Winterfell",
+                                "trafficTargetName": "Winterfell - 1.2.3.4",
+                                "targetIp": "1.2.3.4"
+                        } ]
+                } ]
+        }`)
 
-	EdgeInit(config)
-	// returns type TrafficRecordsResponse [][]string
-	report, err := GetLivenessErrorsReport(dnsTestDomain, dnsTestProperty, queryargs)
+	report, err := GetLivenessErrorsReport(sess, dnsTestDomain, dnsTestProperty, queryargs)
+
 	assert.NoError(t, err)
+	assert.NotNil(t, report)
 	assert.Equal(t, report.Metadata.Date, "2016-11-23")
-
 }
 
 func TestGetTrafficReport_BadArg(t *testing.T) {
-	//(zone string, trafficReportQueryArgs *TrafficReportQueryArgs) (TrafficRecordsResponse, error)
 	dnsTestDomain := "testdomain.com.akadns.net"
 	dnsTestProperty := "testprop"
 	queryargs := map[string]string{"date": "2016/11/23"}
 
+	sess := mockV12Session()
+
 	defer gock.Off()
-	mock := gock.New(fmt.Sprintf("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", dnsTestDomain, dnsTestProperty))
+	mock := gock.New("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net")
 	mock.
 		Get(fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", dnsTestDomain, dnsTestProperty)).
-		HeaderPresent("Authorization").
 		Reply(500).
 		BodyString(`Server Error`)
 
-	EdgeInit(config)
+	_, err := GetLivenessErrorsReport(sess, dnsTestDomain, dnsTestProperty, queryargs)
 
-	// returns type TrafficRecordsResponse [][]string
-	_, err := GetLivenessErrorsReport(dnsTestDomain, dnsTestProperty, queryargs)
 	assert.Error(t, err)
-
 }

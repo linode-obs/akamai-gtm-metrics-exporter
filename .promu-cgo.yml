@@ -1,19 +1,18 @@
 go:
     # Whenever the Go version is updated here, .circle/config.yml and
     # .promu.yml should also be updated.
-    version: 1.15
+    version: 1.24
     cgo: true
 repository:
     path: github.com/akamai/akamai-gtm-metrics-exporter
 build:
     binaries:
-        - name: akamai-gtm-metrics-traffic-exporter
+        - name: akamai-gtm-metrics-exporter
     flags: -a -tags 'netgo static_build'
     ldflags: |
         -X github.com/prometheus/common/version.Version={{.Version}}
         -X github.com/prometheus/common/version.Revision={{.Revision}}
         -X github.com/prometheus/common/version.Branch={{.Branch}}
-        -X github.com/prometheus/common/version.BuildUser={{user}}@{{host}}
         -X github.com/prometheus/common/version.BuildDate={{date "20060102-15:04:05"}}
 tarball:
     files:
@@ -22,5 +21,6 @@ tarball:
 crossbuild:
     platforms:
         - darwin/amd64
+        - darwin/arm64
         - netbsd/amd64
         - netbsd/386

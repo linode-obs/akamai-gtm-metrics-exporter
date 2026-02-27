@@ -15,14 +15,13 @@ package collectors
 
 import (
 	"fmt"
-	client "github.com/akamai/AkamaiOPEN-edgegrid-golang/client-v1"
-	configgtm "github.com/akamai/AkamaiOPEN-edgegrid-golang/configgtm-v1_4"
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/edgegrid"
-	gtm "github.com/akamai/AkamaiOPEN-edgegrid-golang/reportsgtm-v1"
-
+	"net/http"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
 )
 
 const (
@@ -30,209 +29,154 @@ const (
 	GTMTrafficDateFormat     string = "2006-01-02"
 )
 
-var (
-	// EdgegridConfig contains the Akamai OPEN Edgegrid API credentials for automatic signing of requests
-	EdgegridConfig edgegrid.Config = edgegrid.Config{}
-	// testflag is used for test automation only
-)
+// --- Structs & Types ---
 
-// Init edgegrid Config
-func EdgegridInit(edgercpath, section string) error {
-
-	config, err := edgegrid.Init(edgercpath, section)
-	if err != nil {
-		return fmt.Errorf("Edgegrid initialization failed. Error: %s", err.Error())
-	}
-
-	return EdgeInit(config)
+type Metadata struct {
+	Uri                string `json:"uri"`
+	Domain             string `json:"domain"`
+	Interval           string `json:"interval,omitempty"`
+	DatacenterId       int    `json:"datacenterId"`
+	DatacenterNickname string `json:"datacenterNickname"`
+	Start              string `json:"start"`
+	End                string `json:"end"`
 }
 
-// Finish edgegrid init
-func EdgeInit(config edgegrid.Config) error {
-
-	EdgegridConfig = config
-	gtm.Init(config)
-	configgtm.Init(config)
-
-	return nil
+type WindowResponse struct {
+	StartTime time.Time `json:"start"`
+	EndTime   time.Time `json:"end"`
 }
 
-// GTM Reports Query args struct
 type GTMReportQueryArgs struct {
-	End      string `json:"end"`   // YYYY-MM-DDThh:mm:ssZ in UTC
-	Start    string `json:"start"` // YYYY-MM-DDThh:mm:ssZ in UTC
-	Date     string `json:"date"`  // YYYY-MM-DD format
+	End      string `json:"end"`
+	Start    string `json:"start"`
+	Date     string `json:"date"`
 	AgentIP  string `json:"agentIp"`
 	TargetIP string `json:"targetIp"`
 }
 
-// Liveness Errors Report Structs
-type LivenessTMeta struct {
-	URI      string
-	Domain   string `json:"domain"`
-	Property string `json:"property"`
-	Date     string `json:"date"`
+// Datacenter Traffic Structs
+type TrafficProperty struct {
+	Name     string `json:"name"`
+	Requests int64  `json:"requests"`
+	Status   string `json:"status"` // Restored status field
 }
 
-type LivenessDRow struct {
-	Nickname          string `json:"nickname"`
-	DatacenterID      int    `json:"datacenterId"`
-	TrafficTargetName string `json:"trafficTargetName"`
-	ErrorCode         int64  `json:"errorCode"`
-	Duration          int64  `json:"duration"`
-	TestName          string `json:"testName"`
-	AgentIP           string `json:"agentIp"`
-	TargetIP          string `json:"targetIp"`
-}
+// --- Initialization & Session ---
 
-type LivenessTData struct {
-	Timestamp   string          `json:"timestamp"`
-	Datacenters []*LivenessDRow `json:"datacenters"`
-}
-
-// The Liveness Errors Response structure returned by the Reports API
-type LivenessErrorsResponse struct {
-	Metadata    *LivenessTMeta    `json:"metadata"`
-	DataRows    []*LivenessTData  `json:"dataRows"`
-	DataSummary interface{}       `json:"dataSummary"`
-	Links       []*configgtm.Link `json:"links"`
-}
-
-// TODO: Move to https://github.com/akamai/AkamaiOPEN-edgegrid-golang/reportsgtm-v1
-
-// GetLivenessErrorsReport retrieves and returns a liveness errors report slice of slices with provided query filters
-// See https://developer.akamai.com/api/web_performance/global_traffic_management_reporting/v1.html#getgetlivenesstestresultsforaproperty
-func GetLivenessErrorsReport(domainName, propertyName string, livenessReportQueryArgs map[string]string) (*LivenessErrorsResponse, error) {
-
-	stat := &LivenessErrorsResponse{}
-	hostURL := fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", domainName, propertyName)
-
-	req, err := client.NewRequest(
-		EdgegridConfig,
-		"GET",
-		hostURL,
-		nil,
+func NewSession(edgercpath, section string) (session.Session, error) {
+	config, err := edgegrid.New(
+		edgegrid.WithFile(edgercpath),
+		edgegrid.WithSection(section),
 	)
+	if err != nil {
+		return nil, fmt.Errorf("edgegrid initialization failed: %w", err)
+	}
+
+	sess, err := session.New(session.WithSigner(config))
+	if err != nil {
+		return nil, fmt.Errorf("session creation failed: %w", err)
+	}
+
+	return sess, nil
+}
+
+// --- API Implementation ---
+
+func GetLivenessErrorsReport(sess session.Session, domainName, propertyName string, queryArgs map[string]string) (*LivenessErrorsResponse, error) {
+	path := fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", domainName, propertyName)
+
+	req, err := http.NewRequest(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := livenessReportQueryArgs["date"]; !ok {
+
+	if _, ok := queryArgs["date"]; !ok {
 		return nil, fmt.Errorf("GetLivenessErrorsReport: date parameter is required")
 	}
 
-	// Look for and process optional query params
 	q := req.URL.Query()
-	for k, v := range livenessReportQueryArgs {
+	for k, v := range queryArgs {
 		switch k {
-		case "date":
-			q.Add(k, v)
-		case "agentIp":
-			q.Add(k, v)
-		case "targetIp":
+		case "date", "agentIp", "targetIp":
 			q.Add(k, v)
 		}
 	}
-	if len(livenessReportQueryArgs) > 0 {
-		req.URL.RawQuery = q.Encode()
-	}
-
-	// time stamps require urlencoded content header
+	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	res, err := client.Do(EdgegridConfig, req)
+	var result LivenessErrorsResponse
+	resp, err := sess.Exec(req, &result)
 	if err != nil {
 		return nil, err
 	}
 
-	if client.IsError(res) && res.StatusCode != 404 {
-		return nil, client.NewAPIError(res)
-	} else if res.StatusCode == 404 {
-		cErr := configgtm.CommonError{}
-		cErr.SetItem("entityName", "Liveness")
-		cErr.SetItem("name", propertyName)
-		return nil, cErr
-	} else {
-		err = client.BodyJSON(res, stat)
-		if err != nil {
-			return nil, err
-		}
-
-		return stat, nil
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Akamai API returned error status: %d", resp.StatusCode)
 	}
+
+	return &result, nil
 }
 
-// Util function convert time.Time to string
+// --- Utility Functions ---
+
 func convertTimeFormat(src time.Time, format string) (string, error) {
-	// Make sure UTC
-	t := src.UTC().Format(time.RFC3339) // "2006-01-02T15:04:05Z07:00"
+	t := src.UTC().Format(time.RFC3339)
 	if format == time.RFC3339 {
 		return t, nil
-	} else if format == GTMTrafficLongTimeFormat {
+	}
+
+	if format == GTMTrafficLongTimeFormat {
 		tslice := strings.Split(t, "Z")
-		return tslice[0], nil
-	} else if format == GTMTrafficDateFormat {
+		return tslice[0] + "Z", nil
+	}
+
+	if format == GTMTrafficDateFormat {
 		tslice := strings.Split(t, "T")
 		return tslice[0], nil
 	}
-
-	return "", fmt.Errorf("Invalid time")
+	return "", fmt.Errorf("invalid time format")
 }
 
-// Create and return new GTMReportQueryArgs object
-func NewGTMReportQueryArgs() *GTMReportQueryArgs {
-
-	return &GTMReportQueryArgs{}
-}
-
-//  Util function to convert string to time.Time object
 func parseTimeString(srctime, format string) (time.Time, error) {
-
-	ts, err := time.Parse(format, srctime)
-
-	return ts, err
+	return time.Parse(format, srctime)
 }
 
-func sortDCDataRowsByTimestamp(drs []*gtm.DCTData) {
+// --- Sorters ---
 
+func sortDCDataRowsByTimestamp(drs []*DatacenterTrafficData) {
 	sort.Slice(drs, func(i, j int) bool {
 		return drs[i].Timestamp < drs[j].Timestamp
 	})
 }
 
-func sortPropertyDataRowsByTimestamp(drs []*gtm.PropertyTData) {
-
+func sortPropertyDataRowsByTimestamp(drs []*PropertyTrafficData) {
 	sort.Slice(drs, func(i, j int) bool {
 		return drs[i].Timestamp < drs[j].Timestamp
 	})
 }
 
 func sortLivenessDataRowsByTimestamp(drs []*LivenessTData) {
-
 	sort.Slice(drs, func(i, j int) bool {
 		return drs[i].Timestamp < drs[j].Timestamp
 	})
 }
 
-func stringSliceContains(sl []string, entry string) bool {
+// --- Helpers ---
 
+func stringSliceContains(sl []string, entry string) bool {
 	for _, e := range sl {
 		if e == entry {
 			return true
 		}
 	}
-
 	return false
-
 }
 
 func intSliceContains(sl []int, entry int) bool {
-
 	for _, e := range sl {
 		if e == entry {
 			return true
 		}
 	}
-
 	return false
-
 }
