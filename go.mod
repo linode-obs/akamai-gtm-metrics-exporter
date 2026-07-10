@@ -1,6 +1,6 @@
 module github.com/akamai/akamai-gtm-metrics-exporter
 
-go 1.26.4
+go 1.26.5
 
 //replace github.com/akamai/akamai-gtm-metrics-exporter => /home/github.com/akamai/akamai-gtm-metrics-exporter
 
