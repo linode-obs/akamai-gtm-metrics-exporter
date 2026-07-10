@@ -58,8 +58,8 @@ func (c *DomainTraffic) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	if c.Name == "" {
 		return errors.New("required domain name is empty")
 	}
-	if (c.Properties == nil || len(c.Properties) < 1) && (c.Datacenters == nil || len(c.Datacenters) < 1) && (c.Liveness == nil || len(c.Liveness) < 1) {
-		return errors.New("No property, datacenter or liveness configs to collect")
+	if len(c.Properties) < 1 && len(c.Datacenters) < 1 && len(c.Liveness) < 1 {
+		return errors.New("no property, datacenter or liveness configs to collect")
 	}
 
 	return nil
