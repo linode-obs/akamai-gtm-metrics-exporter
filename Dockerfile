@@ -15,5 +15,5 @@ FROM busybox:latest AS app
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/akamai-gtm-metrics-exporter /bin/akamai-gtm-metrics-exporter
 
-EXPOSE 9999
+EXPOSE 9800
 ENTRYPOINT ["/bin/akamai-gtm-metrics-exporter"]

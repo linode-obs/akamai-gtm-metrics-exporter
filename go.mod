@@ -6,7 +6,7 @@ go 1.26.5
 
 require (
 	github.com/akamai/AkamaiOPEN-edgegrid-golang/v13 v13.3.0
-	github.com/prometheus/common v0.69.0
+	github.com/prometheus/common v0.70.0
 	github.com/sirupsen/logrus v1.9.4
 	gopkg.in/h2non/gock.v1 v1.1.2
 	gopkg.in/yaml.v3 v3.0.1
@@ -44,5 +44,5 @@ require (
 	github.com/alecthomas/kingpin/v2 v2.4.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 )
