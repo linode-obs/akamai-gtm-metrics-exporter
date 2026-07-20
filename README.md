@@ -11,7 +11,7 @@ The Prometheus Akamai Global Traffic Management (GTM) Metrics Exporter publishes
 ## Prerequisites
 
 * Prometheus environment.
-* [Go environment](https://golang.org/doc/install).
+* [Go environment](https://go.dev/doc/install).
 * Valid API client with authorization to use the Global Traffic Management Reporting API. [Akamai API Authentication](https://techdocs.akamai.com/developer/docs/edgegrid) provides an overview and further information pertaining to the generation of authorization credentials for API based applications and tools.
 
 ## Install

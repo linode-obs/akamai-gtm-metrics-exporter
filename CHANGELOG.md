@@ -3,7 +3,7 @@
 * Updated Go version to 1.26.5
 * Upgraded the exporter to use latest Prometheus Go libraries
 * Updated Prometheus dependencies (client_golang v1.23.2, common v0.70.0, procfs v0.21.1)
-* Updated golang.org/x dependencies (sys v0.47.0, text v0.38.0)
+* Updated golang.org/x dependencies (sys v0.47.0)
 * Updated project license file
 
 ## 0.2.0 / 2026-02
