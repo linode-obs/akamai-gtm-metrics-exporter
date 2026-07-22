@@ -1,0 +1,49 @@
+name: Publish Docker image
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_REPO: ghcr.io/linode-obs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Normalize version (strip leading v)
+        id: version
+        env:
+          GITHUB_REF_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build per-arch images
+        run: make -e DOCKER_IMAGE_TAG=${{ steps.version.outputs.value }} buildx-docker
+
+      - name: Publish version-tagged images
+        run: make -e DOCKER_IMAGE_TAG=${{ steps.version.outputs.value }} common-docker-publish
+
+      - name: Create and push version manifest
+        run: make -e DOCKER_IMAGE_TAG=${{ steps.version.outputs.value }} common-docker-manifest
