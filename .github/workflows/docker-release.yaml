@@ -12,7 +12,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     env:
-      DOCKER_REPO: ghcr.io/scheranna
+      DOCKER_REPO: ghcr.io/linode-obs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
