@@ -3,6 +3,10 @@ akamai-gtm-metrics-exporter
 akamai-gtm-metrics-traffic-exporter
 akamai-gtm-metrics-*
 
+# -- Don't ignore helm dir --
+!helm/akamai-gtm-metrics-exporter/
+!helm/akamai-gtm-metrics-exporter/**
+
 # --- macOS specific ---
 .DS_Store
 
