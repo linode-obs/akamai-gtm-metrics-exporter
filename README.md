@@ -20,7 +20,7 @@ The Prometheus Akamai Global Traffic Management (GTM) Metrics Exporter publishes
 The fastest way to get started is to download the pre-compiled binary for your system from the [Releases](https://github.com/akamai/akamai-gtm-metrics-exporter/releases) page. Every binary includes a .sig checksum for integrity verification.
 
 ### Build from Source
-If you want to compile the package from source, you will need Go 1.26.4 or later installed.
+If you want to compile the package from source, you will need Go 1.26.5 or later installed.
 
 1. **Clone the repository:**
 
