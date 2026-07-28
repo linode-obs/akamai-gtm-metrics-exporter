@@ -1,6 +1,33 @@
 Thank you for installing {{ include "akamai-gtm-metrics-exporter.fullname" . }}.
 
-1) Configure GTM domains
+1) Provide EdgeGrid credentials
+------------------------------------------------------
+The exporter will run without valid Akamai EdgeGrid credentials, but you should supply them for it to be useful.
+You must provide all 4 credentials: host, clientToken, clientSecret, and accessToken.
+
+You can let the chart create the Secret:
+
+  helm install {{ .Release.Name }} {{ .Chart.Name }} \
+    -n {{ .Release.Namespace }} \
+    --set credentials.create=true \
+    --set credentials.secretData.host=akab-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.luna.akamaiapis.net \
+    --set credentials.secretData.clientToken=<client_token> \
+    --set credentials.secretData.clientSecret=<client_secret> \
+    --set credentials.secretData.accessToken=<access_token>
+
+Or you can use an existing Secret, but be mindful that the keys are correct:
+
+  kubectl create secret generic my-edgegrid-credentials \
+    --from-literal=host=akab-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.luna.akamaiapis.net \
+    --from-literal=clientToken=<client_token> \
+    --from-literal=clientSecret=<client_secret> \
+    --from-literal=accessToken=<access_token>
+
+  helm install {{ .Release.Name }} {{ .Chart.Name }} \
+    -n {{ .Release.Namespace }} \
+    --set credentials.existingSecret=my-edgegrid-credentials
+
+2) Configure GTM domains
 ------------------------
 This chart ships with no domains configured by default:
 
@@ -24,32 +51,3 @@ my_values.yaml
 
 See https://github.com/linode-obs/akamai-gtm-metrics-exporter/blob/master/gtm_metrics_example_config.yml
 for more config format information.
-
-2) Create and mount the .edgerc Secret
---------------------------------------
-The exporter requires Akamai Edgegrid credentials in order to access the GTM API and collect data about your domains. 
-It will run without these credentials but no interesting metrics will be available.
-
-This chart expects a secret with the correct format to pre-exist.
-Create a local .edgerc file in this format:
-
-  [{{ .Values.config.edgercSection }}]
-  host = akab-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.luna.akamaiapis.net
-  client_token = <client_token>
-  client_secret = <client_secret>
-  access_token = <access_token>
-
-All 4 credentials are available from the Akamai Control Center UI:
-Identity and Access Management > Users and API Clients > your_service_account >  Create Credential
-
-Create an opaque Secret from that file:
-
-  kubectl create secret generic my-edgerc-secret \
-    --from-file={{ .Values.edgegrid.edgerc.secretKey }}=/path/to/local/.edgerc
-
-Then set the chart to use it:
-
-  helm install {{ .Release.Name }} {{ .Chart.Name }} \
-    -n {{ .Release.Namespace }} \
-    --set edgegrid.edgerc.existingSecret=my-edgerc-secret \
-    -f my_values.yaml

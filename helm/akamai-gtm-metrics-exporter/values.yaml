@@ -25,8 +25,6 @@ service:
   port: 9800
 
 config:
-  edgercPath: "/etc/akamai/.edgerc"
-  edgercSection: "default"
   summaryWindow: 2d
   prefillWindow: 30m
   timestampLabel: false
@@ -44,10 +42,20 @@ config:
 
 logLevel: debug # one of: debug, info, warn, error, fatal
 
-edgegrid:
-  edgerc:
-    existingSecret: ""
-    secretKey: ".edgerc"
+credentials:
+  create: false
+  existingSecret: ""
+  existingSecretKeys:
+    host: host
+    clientToken: clientToken
+    clientSecret: clientSecret
+    accessToken: accessToken
+  # Used only when credentials.create=true ; all must be supplied.
+  secretData:
+    host: ""
+    clientToken: ""
+    clientSecret: ""
+    accessToken: ""
 
 resources: {}
 

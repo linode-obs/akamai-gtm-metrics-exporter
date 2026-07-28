@@ -6,8 +6,6 @@ metadata:
     {{- include "akamai-gtm-metrics-exporter.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    edgerc_path: {{ .Values.config.edgercPath | quote }}
-    edgerc_section: {{ .Values.config.edgercSection | quote }}
     summary_window: {{ .Values.config.summaryWindow | quote }}
     prefill_window: {{ .Values.config.prefillWindow | quote }}
     timestamp_label: {{ .Values.config.timestampLabel }}

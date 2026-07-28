@@ -41,9 +41,36 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+          {{- if or .Values.credentials.create .Values.credentials.existingSecret }}
+          env:
+            - name: EDGEGRID_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.host }}
+            - name: EDGEGRID_CLIENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.clientToken }}
+            - name: EDGEGRID_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.clientSecret }}
+            - name: EDGEGRID_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.accessToken }}
+          {{- end }}
           args:
             - --config.file=/config/config.yaml
             - --log.level={{ .Values.logLevel }}
+            - --gtm.edgegrid-host=$(EDGEGRID_HOST)
+            - --gtm.edgegrid-client-token=$(EDGEGRID_CLIENT_TOKEN)
+            - --gtm.edgegrid-client-secret=$(EDGEGRID_CLIENT_SECRET)
+            - --gtm.edgegrid-access-token=$(EDGEGRID_ACCESS_TOKEN)
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -51,22 +78,10 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /config
-            {{- if .Values.edgegrid.edgerc.existingSecret }}
-            - name: edgerc
-              mountPath: {{ .Values.config.edgercPath | quote }}
-              subPath: {{ .Values.edgegrid.edgerc.secretKey | quote }}
-              readOnly: true
-            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "akamai-gtm-metrics-exporter.fullname" . }}-config
-        {{- if .Values.edgegrid.edgerc.existingSecret }}
-        - name: edgerc
-          secret:
-            secretName: {{ .Values.edgegrid.edgerc.existingSecret | quote }}
-            defaultMode: 0400
-        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
