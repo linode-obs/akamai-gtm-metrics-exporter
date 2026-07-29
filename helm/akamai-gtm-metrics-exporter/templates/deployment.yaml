@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "akamai-gtm-metrics-exporter.fullname" . }}
+  labels:
+    {{- include "akamai-gtm-metrics-exporter.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "akamai-gtm-metrics-exporter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "akamai-gtm-metrics-exporter.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          {{- if or .Values.credentials.create .Values.credentials.existingSecret }}
+          env:
+            - name: EDGEGRID_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.host }}
+            - name: EDGEGRID_CLIENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.clientToken }}
+            - name: EDGEGRID_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.clientSecret }}
+            - name: EDGEGRID_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKeys.accessToken }}
+          {{- end }}
+          args:
+            - --config.file=/config/config.yaml
+            - --log.level={{ .Values.logLevel }}
+            - --gtm.edgegrid-host=$(EDGEGRID_HOST)
+            - --gtm.edgegrid-client-token=$(EDGEGRID_CLIENT_TOKEN)
+            - --gtm.edgegrid-client-secret=$(EDGEGRID_CLIENT_SECRET)
+            - --gtm.edgegrid-access-token=$(EDGEGRID_ACCESS_TOKEN)
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "akamai-gtm-metrics-exporter.fullname" . }}-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

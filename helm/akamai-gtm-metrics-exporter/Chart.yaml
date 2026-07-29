@@ -1,0 +1,15 @@
+apiVersion: v2
+name: akamai-gtm-metrics-exporter
+description: A Helm chart for akamai-gtm-metrics-exporter
+type: application
+version: 0.1.0
+appVersion: "0.2.0"
+keywords:
+  - akamai
+  - gtm
+  - metrics
+  - exporter
+sources:
+  - https://github.com/linode-obs/akamai-gtm-metrics-exporter
+maintainers:
+  - name: linode-obs
