@@ -41,29 +41,27 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
-          {{- if or .Values.credentials.create .Values.credentials.existingSecret }}
           env:
             - name: EDGEGRID_HOST
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
-                  key: {{ .Values.credentials.existingSecretKeys.host }}
+                  name: {{ .Values.edgegridSecret.name }}
+                  key: {{ .Values.edgegridSecret.hostRef }}
             - name: EDGEGRID_CLIENT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
-                  key: {{ .Values.credentials.existingSecretKeys.clientToken }}
+                  name: {{ .Values.edgegridSecret.name }}
+                  key: {{ .Values.edgegridSecret.clientTokenRef }}
             - name: EDGEGRID_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
-                  key: {{ .Values.credentials.existingSecretKeys.clientSecret }}
+                  name: {{ .Values.edgegridSecret.name }}
+                  key: {{ .Values.edgegridSecret.clientSecretRef }}
             - name: EDGEGRID_ACCESS_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "akamai-gtm-metrics-exporter.credentialsSecretName" . }}
-                  key: {{ .Values.credentials.existingSecretKeys.accessToken }}
-          {{- end }}
+                  name: {{ .Values.edgegridSecret.name }}
+                  key: {{ .Values.edgegridSecret.accessTokenRef }}
           args:
             - --config.file=/config/config.yaml
             - --log.level={{ .Values.logLevel }}

@@ -2,20 +2,19 @@ Thank you for installing {{ include "akamai-gtm-metrics-exporter.fullname" . }}.
 
 1) Provide EdgeGrid credentials
 ------------------------------------------------------
-The exporter will run without valid Akamai EdgeGrid credentials, but you should supply them for it to be useful.
-You must provide all 4 credentials: host, clientToken, clientSecret, and accessToken.
+You must supply the exporter with Akamai EdgeGrid credentials.
 
-You can let the chart create the Secret:
+You can let the chart create a Secret by setting edgegridSecret.create=true and providing host, clientToken, clientSecret, and accessToken:
 
   helm install {{ .Release.Name }} {{ .Chart.Name }} \
     -n {{ .Release.Namespace }} \
-    --set credentials.create=true \
-    --set credentials.secretData.host=akab-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.luna.akamaiapis.net \
-    --set credentials.secretData.clientToken=<client_token> \
-    --set credentials.secretData.clientSecret=<client_secret> \
-    --set credentials.secretData.accessToken=<access_token>
+    --set edgegridSecret.create=true \
+    --set edgegridSecret.host=akab-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.luna.akamaiapis.net \
+    --set edgegridSecret.clientToken=<client_token> \
+    --set edgegridSecret.clientSecret=<client_secret> \
+    --set edgegridSecret.accessToken=<access_token>
 
-Or you can use an existing Secret, but be mindful that the keys are correct:
+Or you can use an existing Secret:
 
   kubectl create secret generic my-edgegrid-credentials \
     --from-literal=host=akab-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.luna.akamaiapis.net \
@@ -25,7 +24,17 @@ Or you can use an existing Secret, but be mindful that the keys are correct:
 
   helm install {{ .Release.Name }} {{ .Chart.Name }} \
     -n {{ .Release.Namespace }} \
-    --set credentials.existingSecret=my-edgegrid-credentials
+    --set edgegridSecret.name=my-edgegrid-credentials
+
+If your Secret already exists with different key names, set the keyNameRef value, ex:
+
+  helm install {{ .Release.Name }} {{ .Chart.Name }} \
+    -n {{ .Release.Namespace }} \
+    --set edgegridSecret.name=my-edgegrid-credentials
+    --set edgegridSecret.hostRef=my-host-key
+    --set edgegridSecret.clientTokenRef=my-client-token-key
+    --set edgegridSecret.clientSecretRef=my-client-secret-key
+    --set edgegridSecret.accessTokenRef=my-access-token-key
 
 2) Configure GTM domains
 ------------------------
