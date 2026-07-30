@@ -40,7 +40,7 @@ config:
     #     - property_name: "myprop"
     #       target_ip: 1.2.3.4 # optionally filter on target ip or cname alias
 
-logLevel: debug # one of: debug, info, warn, error, fatal
+logLevel: info # one of: debug, info, warn, error, fatal
 
 edgegridSecret:
   create: false
