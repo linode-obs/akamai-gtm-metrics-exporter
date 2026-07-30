@@ -40,22 +40,22 @@ config:
     #     - property_name: "myprop"
     #       target_ip: 1.2.3.4 # optionally filter on target ip or cname alias
 
-logLevel: debug # one of: debug, info, warn, error, fatal
+logLevel: info # one of: debug, info, warn, error, fatal
 
-credentials:
+edgegridSecret:
   create: false
-  existingSecret: ""
-  existingSecretKeys:
-    host: host
-    clientToken: clientToken
-    clientSecret: clientSecret
-    accessToken: accessToken
-  # Used only when credentials.create=true ; all must be supplied.
-  secretData:
-    host: ""
-    clientToken: ""
-    clientSecret: ""
-    accessToken: ""
+  name: "akamai-gtm-metrics-exporter-credentials"
+  # Update these *Ref values to match the keys in your secret if you are using an existing secret.
+  clientTokenRef: "clientToken"
+  clientSecretRef: "clientSecret"
+  accessTokenRef: "accessToken"
+  hostRef: "host"
+
+  # Used only when edgegridSecret.create=true ; all must be supplied.
+  host: ""
+  clientToken: ""
+  clientSecret: ""
+  accessToken: ""
 
 resources: {}
 

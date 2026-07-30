@@ -49,16 +49,3 @@ Selector labels
 app.kubernetes.io/name: {{ include "akamai-gtm-metrics-exporter.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
-
-{{/*
-Set the secret name used for EdgeGrid credentials.
-*/}}
-{{- define "akamai-gtm-metrics-exporter.credentialsSecretName" -}}
-{{- if .Values.credentials.existingSecret -}}
-{{- .Values.credentials.existingSecret -}}
-{{- else if .Values.credentials.create -}}
-{{- printf "%s-credentials" (include "akamai-gtm-metrics-exporter.fullname" .) -}}
-{{- else -}}
-""
-{{- end -}}
-{{- end }}
