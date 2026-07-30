@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/session"
 	"github.com/akamai/akamai-gtm-metrics-exporter/collectors"
 	kingpin "github.com/alecthomas/kingpin/v2"
 	"github.com/prometheus/client_golang/prometheus"
@@ -95,11 +95,11 @@ func initAkamaiSession(gtmMetricsConfig collectors.GTMMetricsConfig) (session.Se
 func calcWindowDuration(window string) (time.Duration, error) {
 	var datawin int
 	var err error
-	var multiplier time.Duration = time.Hour * time.Duration(HoursInDay)
+	var multiplier = time.Hour * time.Duration(HoursInDay)
 
 	logrus.Debugf("Window: %s", window)
 	if window == "" {
-		return time.Second * 0, fmt.Errorf("Summary window not set")
+		return time.Second * 0, fmt.Errorf("summary window not set")
 	}
 	iunit := window[len(window)-1:]
 	if !strings.Contains("mhd", strings.ToLower(iunit)) {
@@ -202,7 +202,7 @@ func main() {
 	// 8. HTTP Handlers
 	http.Handle("/metrics", promhttp.HandlerFor(r, promhttp.HandlerOpts{Registry: r}))
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
+		_, _ = w.Write([]byte(`<html>
 			<head><title>akamai_gtm_metrics_exporter</title></head>
 			<body>
 			<h1>akamai_gtm_metrics_exporter</h1>
