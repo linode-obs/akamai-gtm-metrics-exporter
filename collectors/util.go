@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/session"
 )
 
 const (
@@ -111,7 +111,7 @@ func GetLivenessErrorsReport(sess session.Session, domainName, propertyName stri
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("Akamai API returned error status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("akamai API returned error status: %d", resp.StatusCode)
 	}
 
 	return &result, nil
