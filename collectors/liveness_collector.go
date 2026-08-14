@@ -181,67 +181,79 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 			logrus.Debugf("Traffic Metadata: [%v]", livenessTrafficReport.Metadata)
 
+			// Only consider entries in dataRows with a timestamp later than the last processed timestamp for the property.
+			type newRow struct {
+				instance  *LivenessTData
+				timestamp time.Time
+			}
+			var newRows []newRow
 			for _, reportInstance := range livenessTrafficReport.DataRows {
 				instanceTimestamp, err := parseTimeString(reportInstance.Timestamp, GTMTrafficLongTimeFormat)
 				if err != nil {
 					logrus.Errorf("Instance timestamp invalid ... Skipping. Error: %s", err.Error())
 					continue
 				}
-
 				if !instanceTimestamp.After(l.LastTimestamp[domain.Name][prop.PropertyName]) {
 					logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", instanceTimestamp, l.LastTimestamp[domain.Name][prop.PropertyName])
-					logrus.Warnf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
+					logrus.Infof("Skipping already processed report instance: [%v].", reportInstance)
 					continue
 				}
+				newRows = append(newRows, newRow{reportInstance, instanceTimestamp})
+			}
 
-				logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", instanceTimestamp, l.LastTimestamp[domain.Name][prop.PropertyName])
+			// Observe() Histograms and Summaries for every new failure entry, but create new const metrics only on the final row to avoid duplicates.
+			for i, row := range newRows {
+				reportInstance, instanceTimestamp := row.instance, row.timestamp
+				isLast := i == len(newRows)-1
 				var baseLabels = []string{"domain", "property", "datacenter"}
 				for _, instanceDC := range reportInstance.Datacenters {
-					var tsLabels = baseLabels
-					labelVals := []string{domain.Name, prop.PropertyName, strconv.Itoa(instanceDC.DatacenterID)}
-
-					if prop.AgentIP == instanceDC.AgentIP {
-						tsLabels = append(tsLabels, "agentip")
-						labelVals = append(labelVals, instanceDC.AgentIP)
-					}
-					if prop.TargetIP == instanceDC.TargetIP {
-						tsLabels = append(tsLabels, "targetip")
-						labelVals = append(labelVals, instanceDC.TargetIP)
-					}
-					if prop.ErrorCode {
-						tsLabels = append(tsLabels, "errorcode")
-						labelVals = append(labelVals, fmt.Sprintf("%v", instanceDC.ErrorCode))
-					}
-
-					ts := instanceTimestamp.Format(time.RFC3339)
-					if l.GTMConfig.TSLabel {
-						tsLabels = append(tsLabels, "interval_timestamp")
-						labelVals = append(labelVals, ts)
-					}
-
-					desc := prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failures"), "Number of datacenter failures (per domain, property, datacenter)", tsLabels, nil)
-					logrus.Debugf("Creating error failures counter metric. Domain: %s, Property: %s, Datacenter: %d, Timestamp: %v", domain.Name, prop.PropertyName, instanceDC.DatacenterID, ts)
-					var errorsmetric, durmetric prometheus.Metric
-					errorsmetric = prometheus.MustNewConstMetric(
-						desc, prometheus.CounterValue, 1, labelVals...)
-					if l.GTMConfig.UseTimestamp != nil && !*l.GTMConfig.UseTimestamp {
-						ch <- errorsmetric
-					} else {
-						ch <- prometheus.NewMetricWithTimestamp(instanceTimestamp, errorsmetric)
-					}
-					desc = prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failure_duration"), "Datacenter failure duration (per domain, property, datacenter)", tsLabels, nil)
-					logrus.Debugf("Creating failure duration gauge metric. Domain: %s, Property: %s, Datacenter: %d, Timestamp: %v", domain.Name, prop.PropertyName, instanceDC.DatacenterID, ts)
-					durmetric = prometheus.MustNewConstMetric(
-						desc, prometheus.GaugeValue, float64(instanceDC.Duration), labelVals...)
-					if l.GTMConfig.UseTimestamp != nil && !*l.GTMConfig.UseTimestamp {
-						ch <- durmetric
-					} else {
-						ch <- prometheus.NewMetricWithTimestamp(instanceTimestamp, durmetric)
-					}
 					maps := l.getDatacenterHistogramMetrics(domain.Name, prop.PropertyName, instanceDC.DatacenterID)
 					maps["duration"].(prometheus.Histogram).Observe(float64(instanceDC.Duration))
 					maps["errors"].(prometheus.Summary).Observe(float64(1))
 
+					if isLast {
+						var tsLabels = baseLabels
+						labelVals := []string{domain.Name, prop.PropertyName, strconv.Itoa(instanceDC.DatacenterID)}
+
+						if prop.AgentIP == instanceDC.AgentIP {
+							tsLabels = append(tsLabels, "agentip")
+							labelVals = append(labelVals, instanceDC.AgentIP)
+						}
+						if prop.TargetIP == instanceDC.TargetIP {
+							tsLabels = append(tsLabels, "targetip")
+							labelVals = append(labelVals, instanceDC.TargetIP)
+						}
+						if prop.ErrorCode {
+							tsLabels = append(tsLabels, "errorcode")
+							labelVals = append(labelVals, fmt.Sprintf("%v", instanceDC.ErrorCode))
+						}
+
+						ts := instanceTimestamp.Format(time.RFC3339)
+						if l.GTMConfig.TSLabel {
+							tsLabels = append(tsLabels, "interval_timestamp")
+							labelVals = append(labelVals, ts)
+						}
+
+						desc := prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failures"), "Number of datacenter failures (per domain, property, datacenter)", tsLabels, nil)
+						logrus.Debugf("Creating error failures counter metric. Domain: %s, Property: %s, Datacenter: %d, Timestamp: %v", domain.Name, prop.PropertyName, instanceDC.DatacenterID, ts)
+						var errorsmetric, durmetric prometheus.Metric
+						errorsmetric = prometheus.MustNewConstMetric(
+							desc, prometheus.CounterValue, 1, labelVals...)
+						if l.GTMConfig.UseTimestamp != nil && !*l.GTMConfig.UseTimestamp {
+							ch <- errorsmetric
+						} else {
+							ch <- prometheus.NewMetricWithTimestamp(instanceTimestamp, errorsmetric)
+						}
+						desc = prometheus.NewDesc(prometheus.BuildFQName(l.LivenessMetricPrefix, "", "datacenter_failure_duration"), "Datacenter failure duration (per domain, property, datacenter)", tsLabels, nil)
+						logrus.Debugf("Creating failure duration gauge metric. Domain: %s, Property: %s, Datacenter: %d, Timestamp: %v", domain.Name, prop.PropertyName, instanceDC.DatacenterID, ts)
+						durmetric = prometheus.MustNewConstMetric(
+							desc, prometheus.GaugeValue, float64(instanceDC.Duration), labelVals...)
+						if l.GTMConfig.UseTimestamp != nil && !*l.GTMConfig.UseTimestamp {
+							ch <- durmetric
+						} else {
+							ch <- prometheus.NewMetricWithTimestamp(instanceTimestamp, durmetric)
+						}
+					}
 				} // datacenter end
 
 				// Update last timestamp processed
@@ -249,8 +261,6 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 					logrus.Debugf("Updating Last Timestamp from %v TO %v", l.LastTimestamp[domain.Name][prop.PropertyName], instanceTimestamp)
 					l.LastTimestamp[domain.Name][prop.PropertyName] = instanceTimestamp
 				}
-				// only process one each interval!
-				break
 			}
 		}
 	}
