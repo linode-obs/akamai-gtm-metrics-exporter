@@ -650,7 +650,7 @@ func TestLivenessCollectorCollectAdvancesDayBoundary(t *testing.T) {
 			"date": "2026-08-12",
 			"domain": "example.akadns.net",
 			"property": "www",
-				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-11"
+				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-12"
 		},
 		"dataRows": [
 			{
