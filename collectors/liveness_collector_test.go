@@ -596,6 +596,7 @@ func TestLivenessCollectorCollectAdvancesDayBoundary(t *testing.T) {
 
 	gock.New(mockAkamaiBaseURL).
 		Get("/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www").
+		MatchParam("date", "2026-08-11").
 		Reply(200).
 		BodyString(`{ 
 			"metadata": {
@@ -642,6 +643,7 @@ func TestLivenessCollectorCollectAdvancesDayBoundary(t *testing.T) {
 
 	gock.New(mockAkamaiBaseURL).
 		Get("/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www").
+		MatchParam("date", "2026-08-12").
 		Reply(200).
 		BodyString(`{ 
 			"metadata": {
