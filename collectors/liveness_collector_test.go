@@ -46,7 +46,8 @@ func resetLivenessCollectorTestState() {
 	livenessErrorsSummaryMap = make(map[string]map[string]map[int]prometheus.Summary)
 }
 
-func newTestLivenessCollector() (*GTMLivenessTrafficExporter, *prometheus.Registry) {
+// Creates a collector and registry for a test, with a configurable tstart (the first LastTimestamp) and a single property.
+func newTestLivenessCollector(tstart time.Time) (*GTMLivenessTrafficExporter, *prometheus.Registry) {
 	resetLivenessCollectorTestState()
 
 	registry := prometheus.NewRegistry()
@@ -69,42 +70,43 @@ func newTestLivenessCollector() (*GTMLivenessTrafficExporter, *prometheus.Regist
 			UseTimestamp: &useTimestamp,
 		},
 		"akamai_",
-		time.Date(2026, time.August, 13, 12, 55, 0, 0, time.UTC), // tstart
+		tstart,
 		time.Hour, // lookbackDuration
 	)
 
 	return collector, registry
 }
 
-func mockLivenessCollectorResponses(t *testing.T, body string) {
+// mocks responses from the liveness-test reporting API for a single day based on the date passed in YYYY-MM-DD format
+func mockLivenessCollectorResponsesSingleDay(t *testing.T, date string, body string) {
 	t.Helper()
 
 	gock.New(mockAkamaiBaseURL).
 		Get("/gtm-api/v1/reports/liveness-tests/window").
 		Reply(200).
 		JSON(map[string]string{
-			"start": "2026-08-10T00:00:00Z",
-			"end":   "2026-08-13T23:59:59Z",
+			"start": date + "T00:00:00Z",
+			"end":   date + "T23:59:59Z",
 		})
 
 	gock.New(mockAkamaiBaseURL).
 		Get("/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www").
-		MatchParam("date", "2026-08-13").
+		MatchParam("date", date).
 		Reply(200).
 		BodyString(body)
 }
 
 func TestLivenessCollectorCollectAndCompareUsesLatestNewRowForConstMetrics(t *testing.T) {
 	defer gock.Off()
-	collector, _ := newTestLivenessCollector()
+	collector, _ := newTestLivenessCollector(time.Date(2026, time.August, 13, 12, 55, 0, 0, time.UTC))
 	wrappedCollector := livenessConstMetricCollector{collector: collector}
 
-	mockLivenessCollectorResponses(t, `{
+	mockLivenessCollectorResponsesSingleDay(t, "2026-08-13", `{
 		"metadata": {
 			"date": "2026-08-13",
 			"domain": "example.akadns.net",
 			"property": "www",
-			"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-14"
+			"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-13"
 		},
 		"dataRows": [
 			{
@@ -181,14 +183,14 @@ akamai_property_liveness_errors_datacenter_failure_duration{datacenter="3201",do
 
 func TestLivenessCollectorCollectUpdatesHistogramAndSummaryForAllNewRows(t *testing.T) {
 	defer gock.Off()
-	collector, registry := newTestLivenessCollector()
+	collector, registry := newTestLivenessCollector(time.Date(2026, time.August, 13, 12, 55, 0, 0, time.UTC))
 
-	mockLivenessCollectorResponses(t, `{
+	mockLivenessCollectorResponsesSingleDay(t, "2026-08-13", `{
 		"metadata": {
 				"date": "2026-08-13",
 			"domain": "example.akadns.net",
 			"property": "www",
-				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-14"
+				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-13"
 		},
 		"dataRows": [
 			{
@@ -274,15 +276,15 @@ akamai_property_liveness_errors_errors_per_datacenter_summary_count{datacenter="
 
 func TestLivenessCollectorCollectSkipsOldRows(t *testing.T) {
 	defer gock.Off()
-	collector, registry := newTestLivenessCollector()
+	collector, registry := newTestLivenessCollector(time.Date(2026, time.August, 13, 12, 55, 0, 0, time.UTC))
 	wrappedCollector := livenessConstMetricCollector{collector: collector}
 
-	mockLivenessCollectorResponses(t, `{
+	mockLivenessCollectorResponsesSingleDay(t, "2026-08-13", `{
 		"metadata": {
 				"date": "2026-08-13",
 			"domain": "example.akadns.net",
 			"property": "www",
-				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-14"
+				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-13"
 		},
 		"dataRows": [
 			{
@@ -398,14 +400,14 @@ akamai_property_liveness_errors_errors_per_datacenter_summary_count{datacenter="
 
 func TestLivenessCollectorCollectMultipleSeriesHistogramSummary(t *testing.T) {
 	defer gock.Off()
-	collector, registry := newTestLivenessCollector()
+	collector, registry := newTestLivenessCollector(time.Date(2026, time.August, 13, 12, 55, 0, 0, time.UTC))
 
-	mockLivenessCollectorResponses(t, `{
+	mockLivenessCollectorResponsesSingleDay(t, "2026-08-13", `{
 		"metadata": {
 				"date": "2026-08-13",
 			"domain": "example.akadns.net",
 			"property": "www",
-				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-14"
+				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-13"
 		},
 		"dataRows": [
 			{
@@ -511,5 +513,191 @@ akamai_property_liveness_errors_errors_per_datacenter_summary_count{datacenter="
 		t,
 		time.Date(2026, time.August, 13, 13, 15, 5, 0, time.UTC),
 		collector.LastTimestamp["example.akadns.net"]["www"],
+	)
+}
+
+func TestPickLivenessReportDate(t *testing.T) {
+	testCases := []struct {
+		name              string
+		start             time.Time
+		windowStart       time.Time
+		windowEnd         time.Time
+		expectedDate      string
+		expectedReportEnd time.Time
+	}{
+		{
+			name:              "StartWithinWindowDayBehindReportEndDayEnd",
+			start:             time.Date(2026, time.August, 13, 12, 55, 0, 0, time.UTC),
+			windowStart:       time.Date(2026, time.August, 12, 0, 0, 0, 0, time.UTC),
+			windowEnd:         time.Date(2026, time.August, 14, 15, 25, 5, 0, time.UTC),
+			expectedDate:      "2026-08-13",
+			expectedReportEnd: time.Date(2026, time.August, 13, 23, 59, 59, 0, time.UTC),
+		},
+		{
+			name:              "StartWithinWindowLatestDayReportEndWindowEnd",
+			start:             time.Date(2026, time.August, 14, 14, 23, 0, 0, time.UTC),
+			windowStart:       time.Date(2026, time.August, 12, 0, 0, 0, 0, time.UTC),
+			windowEnd:         time.Date(2026, time.August, 14, 15, 25, 5, 0, time.UTC),
+			expectedDate:      "2026-08-14",
+			expectedReportEnd: time.Date(2026, time.August, 14, 15, 25, 5, 0, time.UTC),
+		},
+		{
+			name:              "StartAfterWindowEndReportEndWindowEnd",
+			start:             time.Date(2026, time.August, 16, 8, 0, 0, 0, time.UTC),
+			windowStart:       time.Date(2026, time.August, 12, 0, 0, 0, 0, time.UTC),
+			windowEnd:         time.Date(2026, time.August, 14, 15, 25, 5, 0, time.UTC),
+			expectedDate:      "2026-08-14",
+			expectedReportEnd: time.Date(2026, time.August, 14, 15, 25, 5, 0, time.UTC),
+		},
+		{
+			name:              "StartBeforeWindowStartReportEndDayEnd",
+			start:             time.Date(2026, time.August, 10, 8, 0, 0, 0, time.UTC),
+			windowStart:       time.Date(2026, time.August, 12, 0, 0, 0, 0, time.UTC),
+			windowEnd:         time.Date(2026, time.August, 14, 15, 25, 5, 0, time.UTC),
+			expectedDate:      "2026-08-12",
+			expectedReportEnd: time.Date(2026, time.August, 12, 23, 59, 59, 0, time.UTC),
+		},
+		{
+			name:              "StartBeforeWindowStartReportEndWindowEnd",
+			start:             time.Date(2026, time.August, 10, 8, 0, 0, 0, time.UTC),
+			windowStart:       time.Date(2026, time.August, 12, 0, 0, 0, 0, time.UTC),
+			windowEnd:         time.Date(2026, time.August, 12, 15, 25, 5, 0, time.UTC),
+			expectedDate:      "2026-08-12",
+			expectedReportEnd: time.Date(2026, time.August, 12, 15, 25, 5, 0, time.UTC),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			reportDate, reportEnd, err := pickLivenessReportDate(tc.start, tc.windowStart, tc.windowEnd)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedDate, reportDate)
+			require.Equal(t, tc.expectedReportEnd, reportEnd)
+		})
+	}
+}
+
+func TestLivenessCollectorCollectAdvancesDayBoundary(t *testing.T) {
+	defer gock.Off()
+	// lastReportRequested falls within window, but is the day before windowEnd.
+	collector, _ := newTestLivenessCollector(time.Date(2026, time.August, 11, 23, 30, 0, 0, time.UTC))
+	wrappedCollector := livenessConstMetricCollector{collector: collector}
+
+	// The first Collect() will request Aug 11 report (date of LastReportEndTime), which contains an already processed row
+	// This will set LastReportEndTime to the end of Aug 11, and the next Collect() will request the next day.
+	gock.New(mockAkamaiBaseURL).
+		Get("/gtm-api/v1/reports/liveness-tests/window").
+		Reply(200).
+		JSON(map[string]string{
+			"start": "2026-08-11T00:00:00Z",
+			"end":   "2026-08-12T13:45:04Z",
+		})
+
+	gock.New(mockAkamaiBaseURL).
+		Get("/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www").
+		MatchParam("date", "2026-08-11").
+		Reply(200).
+		BodyString(`{ 
+			"metadata": {
+			"date": "2026-08-11",
+			"domain": "example.akadns.net",
+			"property": "www",
+				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-11"
+		},
+		"dataRows": [
+			{
+				"timestamp": "2026-08-11T23:30:00Z",
+				"datacenters": [
+					{
+						"datacenterId": 3201,
+						"agentIp": "204.1.136.239",
+						"testName": "Our defences",
+						"errorCode": 3101,
+						"duration": 1297,
+						"nickname": "Winterfell",
+						"trafficTargetName": "Winterfell - 1.2.3.4",
+						"targetIp": "1.2.3.4"
+					}
+				]
+			}
+		]
+	}`)
+
+	// The const metrics should not appear as the row is not older than lastTimestamp
+	require.NoError(t, testutil.CollectAndCompare(
+		wrappedCollector,
+		strings.NewReader(``), // expect no output → metric must be absent
+		"akamai_property_liveness_errors_datacenter_failures",
+		"akamai_property_liveness_errors_datacenter_failure_duration",
+	))
+
+	// The second Collect() should be for Aug 12 (the next day)
+	gock.New(mockAkamaiBaseURL).
+		Get("/gtm-api/v1/reports/liveness-tests/window").
+		Reply(200).
+		JSON(map[string]string{
+			"start": "2026-08-11T00:00:00Z",
+			"end":   "2026-08-12T13:45:04Z",
+		})
+
+	gock.New(mockAkamaiBaseURL).
+		Get("/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www").
+		MatchParam("date", "2026-08-12").
+		Reply(200).
+		BodyString(`{ 
+			"metadata": {
+			"date": "2026-08-12",
+			"domain": "example.akadns.net",
+			"property": "www",
+				"uri": "https://example.invalid/gtm-api/v1/reports/liveness-tests/domains/example.akadns.net/properties/www?date=2026-08-12"
+		},
+		"dataRows": [
+			{
+				"timestamp": "2026-08-12T09:16:05Z",
+				"datacenters": [
+					{
+						"datacenterId": 3201,
+						"agentIp": "204.1.136.239",
+						"testName": "Our defences",
+						"errorCode": 3101,
+						"duration": 30,
+						"nickname": "Winterfell",
+						"trafficTargetName": "Winterfell - 1.2.3.4",
+						"targetIp": "1.2.3.4"
+					}
+				]
+			}
+		]
+	}`)
+
+	// The const metrics should reflect the new failure
+	expectedConst := strings.NewReader(`# HELP akamai_property_liveness_errors_datacenter_failures Number of datacenter failures (per domain, property, datacenter)
+# TYPE akamai_property_liveness_errors_datacenter_failures counter
+akamai_property_liveness_errors_datacenter_failures{datacenter="3201",domain="example.akadns.net",property="www"} 1
+# HELP akamai_property_liveness_errors_datacenter_failure_duration Datacenter failure duration (per domain, property, datacenter)
+# TYPE akamai_property_liveness_errors_datacenter_failure_duration gauge
+akamai_property_liveness_errors_datacenter_failure_duration{datacenter="3201",domain="example.akadns.net",property="www"} 30
+`)
+
+	require.NoError(t, testutil.CollectAndCompare(
+		wrappedCollector,
+		expectedConst,
+		"akamai_property_liveness_errors_datacenter_failures",
+		"akamai_property_liveness_errors_datacenter_failure_duration",
+	))
+
+	require.True(t, gock.IsDone(), "expected mocked liveness endpoints to be called")
+	// LastTimestamp should be updated to the timestamp of the single row in day 2
+	require.Equal(
+		t,
+		time.Date(2026, time.August, 12, 9, 16, 5, 0, time.UTC),
+		collector.LastTimestamp["example.akadns.net"]["www"],
+	)
+	// LastReportEndTime should be updated to the windowEnd of the report.
+	require.Equal(
+		t,
+		time.Date(2026, time.August, 12, 13, 45, 4, 0, time.UTC),
+		collector.LastReportEndTime["example.akadns.net"]["www"],
 	)
 }
