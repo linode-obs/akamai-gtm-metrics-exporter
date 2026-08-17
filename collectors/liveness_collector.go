@@ -54,13 +54,11 @@ type GTMLivenessTrafficExporter struct {
 	GTMConfig                GTMMetricsConfig
 	LivenessMetricPrefix     string
 	LivenessLookbackDuration time.Duration
-	// LastTimestamp is the time of the last processed liveness failure for each domain and property to avoid processing the same failure multiple times.
-	LastTimestamp map[string]map[string]time.Time // index by domain, liveness
-	// LastReportEndTime holds the end time of the last report requested for each domain and property, regardless of whether it included failures.
-	LastReportEndTime map[string]map[string]time.Time // index by domain, liveness
-	LivenessRegistry  *prometheus.Registry
-	AkamaiSession     session.Session
-	ctx               context.Context
+	LastTimestamp            map[string]map[string]time.Time // index by domain, liveness
+	LastReportEndTime        map[string]map[string]time.Time // index by domain, liveness
+	LivenessRegistry         *prometheus.Registry
+	AkamaiSession            session.Session
+	ctx                      context.Context
 }
 
 func NewLivenessTrafficCollector(ctx context.Context, sess session.Session, r *prometheus.Registry, gtmMetricsConfig GTMMetricsConfig, gtmMetricPrefix string, tstart time.Time, lookbackDuration time.Duration) *GTMLivenessTrafficExporter {
