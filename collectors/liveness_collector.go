@@ -54,10 +54,13 @@ type GTMLivenessTrafficExporter struct {
 	GTMConfig                GTMMetricsConfig
 	LivenessMetricPrefix     string
 	LivenessLookbackDuration time.Duration
-	LastTimestamp            map[string]map[string]time.Time // index by domain, liveness
-	LivenessRegistry         *prometheus.Registry
-	AkamaiSession            session.Session
-	ctx                      context.Context
+	// LastTimestamp is the time of the last processed liveness failure for each domain and property to avoid processing the same failure multiple times.
+	LastTimestamp map[string]map[string]time.Time // index by domain, liveness
+	// LastReportEndTime holds the end time of the last report requested for each domain and property, regardless of whether it included failures.
+	LastReportEndTime map[string]map[string]time.Time // index by domain, liveness
+	LivenessRegistry  *prometheus.Registry
+	AkamaiSession     session.Session
+	ctx               context.Context
 }
 
 func NewLivenessTrafficCollector(ctx context.Context, sess session.Session, r *prometheus.Registry, gtmMetricsConfig GTMMetricsConfig, gtmMetricPrefix string, tstart time.Time, lookbackDuration time.Duration) *GTMLivenessTrafficExporter {
@@ -73,18 +76,23 @@ func NewLivenessTrafficCollector(ctx context.Context, sess session.Session, r *p
 	gtmLivenessTrafficExporter.LivenessRegistry = r
 
 	domainMap := make(map[string]map[string]time.Time)
+	reportMap := make(map[string]map[string]time.Time)
 	for _, domain := range gtmMetricsConfig.Domains {
 		tStampMap := make(map[string]time.Time)
+		rEndTimeMap := make(map[string]time.Time)
 		livenessDurationHistogramMap[domain.Name] = make(map[string]map[int]prometheus.Histogram)
 		livenessErrorsSummaryMap[domain.Name] = make(map[string]map[int]prometheus.Summary)
 		for _, prop := range domain.Liveness {
 			livenessDurationHistogramMap[domain.Name][prop.PropertyName] = make(map[int]prometheus.Histogram)
 			livenessErrorsSummaryMap[domain.Name][prop.PropertyName] = make(map[int]prometheus.Summary)
 			tStampMap[prop.PropertyName] = tstart
+			rEndTimeMap[prop.PropertyName] = tstart
 		}
 		domainMap[domain.Name] = tStampMap
+		reportMap[domain.Name] = rEndTimeMap
 	}
 	gtmLivenessTrafficExporter.LastTimestamp = domainMap
+	gtmLivenessTrafficExporter.LastReportEndTime = reportMap
 
 	return &gtmLivenessTrafficExporter
 }
@@ -137,17 +145,14 @@ func (l *GTMLivenessTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
 func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	logrus.Debug("Entering GTM Property Liveness Errors Collect")
 
-	endtime := time.Now().UTC() // Use same current time for all zones
-
 	// Collect metrics for each domain and liveness
 	for _, domain := range l.GTMConfig.Domains {
 		logrus.Debugf("Processing domain %s", domain.Name)
 		for _, prop := range domain.Liveness {
-			// get last timestamp recorded. make sure diff > 5 mins.
-			lasttime := l.LastTimestamp[domain.Name][prop.PropertyName].Add(time.Minute)
+			// Timestamp of the end of the last report requested for this property, plus a small buffer which will advance the day if needed.
+			lastReportRequested := l.LastReportEndTime[domain.Name][prop.PropertyName].Add(time.Minute)
 			logrus.Debugf("Fetching liveness errors Report for property %s in domain %s.", prop.PropertyName, domain.Name)
-
-			livenessTrafficReport, err := l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, lasttime)
+			livenessTrafficReport, reportEnd, err := l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, lastReportRequested)
 
 			if err != nil {
 				errStr := err.Error()
@@ -162,21 +167,6 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				}
 				logrus.Errorf("Unable to get liveness report for property %s ... Skipping. Error: %s", prop.PropertyName, err.Error())
 				continue
-			}
-
-			// Handle Day Boundary Crossing
-			if len(livenessTrafficReport.DataRows) < 1 && endtime.Day() != lasttime.Day() {
-				lasttime = lasttime.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
-				livenessTrafficReport, err = l.retrieveLivenessTraffic(domain.Name, prop.PropertyName, prop.AgentIP, prop.TargetIP, lasttime)
-				if err != nil {
-					if strings.Contains(err.Error(), "500") || strings.Contains(err.Error(), "400") {
-						logrus.Warnf("Unable to get liveness errors report for property %s after day bump. Skipping.", prop.PropertyName)
-						continue
-					}
-					logrus.Errorf("Unable to get liveness report for property %s after day bump. Error: %s", prop.PropertyName, err.Error())
-					logrus.Errorf("%s", err.Error())
-					continue
-				}
 			}
 
 			logrus.Debugf("Traffic Metadata: [%v]", livenessTrafficReport.Metadata)
@@ -200,6 +190,9 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				}
 				newRows = append(newRows, newRow{reportInstance, instanceTimestamp})
 			}
+
+			// Regardless of whether the report included new rows, update the LastReportEndTime.
+			l.LastReportEndTime[domain.Name][prop.PropertyName] = reportEnd
 
 			// Observe() Histograms and Summaries for every new failure entry, but create new const metrics only on the final row to avoid duplicates.
 			for i, row := range newRows {
@@ -266,7 +259,7 @@ func (l *GTMLivenessTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	}
 }
 
-func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agentID, targetID string, start time.Time) (*LivenessErrorsResponse, error) {
+func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agentID, targetID string, start time.Time) (*LivenessErrorsResponse, time.Time, error) {
 	qargs := make(map[string]string)
 
 	if len(targetID) > 0 {
@@ -290,51 +283,38 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 	windowPath := "/gtm-api/v1/reports/liveness-tests/window"
 	windowReq, err := http.NewRequestWithContext(l.ctx, http.MethodGet, windowPath, nil)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 
 	_, err = l.AkamaiSession.Exec(windowReq, &apiWindow)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch liveness window: %w", err)
+		return nil, time.Time{}, fmt.Errorf("failed to fetch liveness window: %w", err)
 	}
 
 	// Convert API strings to time.Time objects
 	windowStart, err := time.Parse(time.RFC3339, apiWindow.Start)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	windowEnd, err := time.Parse(time.RFC3339, apiWindow.End)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 
-	if windowStart.Before(start) {
-		if windowEnd.After(start) {
-			qargs["date"], err = convertTimeFormat(start, GTMTrafficDateFormat)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			qargs["date"], err = convertTimeFormat(windowEnd, GTMTrafficDateFormat)
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		qargs["date"], err = convertTimeFormat(windowStart, GTMTrafficDateFormat)
-		if err != nil {
-			return nil, err
-		}
+	reportDate, reportEnd, err := pickLivenessReportDate(start, windowStart, windowEnd)
+	if err != nil {
+		return nil, time.Time{}, err
 	}
+	qargs["date"] = reportDate
 
 	path := fmt.Sprintf("/gtm-api/v1/reports/liveness-tests/domains/%s/properties/%s", domain, prop)
 	req, err := http.NewRequestWithContext(l.ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 
 	if _, ok := qargs["date"]; !ok {
-		return nil, fmt.Errorf("GetLivenessErrorsReport: date parameter is required")
+		return nil, time.Time{}, fmt.Errorf("GetLivenessErrorsReport: date parameter is required")
 	}
 
 	q := req.URL.Query()
@@ -356,15 +336,58 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 	resp, err := l.AkamaiSession.Exec(req, &result)
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("property %s not found in domain %s for liveness report", prop, domain)
+			return nil, time.Time{}, fmt.Errorf("property %s not found in domain %s for liveness report", prop, domain)
 		}
-		return nil, err
+		return nil, time.Time{}, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, time.Time{}, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
 	sortLivenessDataRowsByTimestamp(result.DataRows)
-	return &result, nil
+	return &result, reportEnd, nil
+}
+
+func pickLivenessReportDate(start, windowStart, windowEnd time.Time) (string, time.Time, error) {
+	var requestDate time.Time
+	var reportEnd time.Time
+
+	// start is the start of the time period the caller is interested in (generally the ending time of the last report processed
+	// or the start time of the exporter minus an optional prefill period). We want to pick the report for
+	// the day that includes start (if possible), and keep track of the end time of the report requested, which will be
+	// either the end of the window (if that date is the most recent day available) or the end of that day
+	// (if the date is for a day in the past).
+	// Setting reportEnd to the end of the day cues the next Collect() to request the following day.
+
+	if windowStart.Before(start) {
+		if windowEnd.After(start) {
+			// If the window includes the requested start time, request that date.
+			requestDate = start
+			// reportEnd is the end of the date requested, or the end of the window, whichever is earlier
+			reportEnd = time.Date(start.Year(), start.Month(), start.Day(), 23, 59, 59, 0, time.UTC)
+			if reportEnd.After(windowEnd) {
+				reportEnd = windowEnd
+			}
+		} else {
+			// If the window ends before the requested start time, request the latest available date
+			requestDate = windowEnd
+			reportEnd = windowEnd
+		}
+	} else {
+		// If the window start is after the requested start time, request the earliest available date.
+		requestDate = windowStart
+		// reportEnd is the end of the date requested, or the end of the window, whichever is earlier
+		reportEnd = time.Date(windowStart.Year(), windowStart.Month(), windowStart.Day(), 23, 59, 59, 0, time.UTC)
+		if reportEnd.After(windowEnd) {
+			reportEnd = windowEnd
+		}
+	}
+
+	reportDate, err := convertTimeFormat(requestDate, GTMTrafficDateFormat)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	return reportDate, reportEnd, nil
 }
