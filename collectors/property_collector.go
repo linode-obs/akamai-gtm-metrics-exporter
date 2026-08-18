@@ -178,7 +178,7 @@ func (p *GTMPropertyTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 				if !instanceTimestamp.After(p.LastTimestamp[domain.Name][prop.Name]) {
 					logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", instanceTimestamp, p.LastTimestamp[domain.Name][prop.Name])
-					logrus.Warnf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
+					logrus.Debugf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
 					continue
 				}
 
@@ -317,7 +317,7 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 	}
 
 	if qargs["start"] >= qargs["end"] {
-		logrus.Warnf("Start or End time outside valid property window for %s. Skipping.", prop)
+		logrus.Infof("Start or End time outside valid property window for %s. Skipping.", prop)
 		return &PropertyTrafficResponse{DataRows: []*PropertyTrafficData{}}, nil
 	}
 
