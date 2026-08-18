@@ -152,7 +152,7 @@ func (d *GTMDatacenterTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				// Strict check against last processed timestamp
 				if !instanceTimestamp.After(d.LastTimestamp[domain.Name][dc.DatacenterID]) {
 					logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", instanceTimestamp, d.LastTimestamp[domain.Name][dc.DatacenterID])
-					logrus.Warnf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
+					logrus.Debugf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
 					continue
 				}
 
@@ -282,7 +282,7 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 
 	// Window validation check
 	if qargs["start"] >= qargs["end"] {
-		logrus.Warnf("Start or End time outside valid report window")
+		logrus.Infof("Start or End time outside valid report window")
 		return &DcTrafficResponse{DataRows: []*DatacenterTrafficData{}}, nil
 	}
 
