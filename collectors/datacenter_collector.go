@@ -240,9 +240,12 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 
 	// Use d.AkamaiSession.Exec.
 	// Note: If Exec returns the response, check for errors before parsing.
-	_, err := d.AkamaiSession.Exec(windowReq, &apiWindow)
+	windowResp, err := d.AkamaiSession.Exec(windowReq, &apiWindow)
+	if windowResp != nil {
+		defer windowResp.Body.Close()
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch traffic window: %w", err)
+		return nil, withResponseBody(fmt.Errorf("failed to fetch traffic window: %w", err), windowResp)
 	}
 
 	// Convert strings to time.Time to match old WindowResponse logic
@@ -299,15 +302,18 @@ func (d *GTMDatacenterTrafficExporter) retrieveDatacenterTraffic(domain string, 
 
 	var result DcTrafficResponse
 	resp, err := d.AkamaiSession.Exec(req, &result)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("datacenter %d not found in domain %s", dc, domain)
+			return nil, withResponseBody(fmt.Errorf("datacenter %d not found in domain %s", dc, domain), resp)
 		}
-		return nil, err
+		return nil, withResponseBody(err, resp)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status: %d: %s", resp.StatusCode, responseBody(resp))
 	}
 
 	sortDCDataRowsByTimestamp(result.DataRows)

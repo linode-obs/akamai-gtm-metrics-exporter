@@ -284,9 +284,12 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 		return nil, time.Time{}, err
 	}
 
-	_, err = l.AkamaiSession.Exec(windowReq, &apiWindow)
+	windowResp, err := l.AkamaiSession.Exec(windowReq, &apiWindow)
+	if windowResp != nil {
+		defer windowResp.Body.Close()
+	}
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("failed to fetch liveness window: %w", err)
+		return nil, time.Time{}, withResponseBody(fmt.Errorf("failed to fetch liveness window: %w", err), windowResp)
 	}
 
 	// Convert API strings to time.Time objects
@@ -332,15 +335,18 @@ func (l *GTMLivenessTrafficExporter) retrieveLivenessTraffic(domain, prop, agent
 
 	var result LivenessErrorsResponse
 	resp, err := l.AkamaiSession.Exec(req, &result)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return nil, time.Time{}, fmt.Errorf("property %s not found in domain %s for liveness report", prop, domain)
+			return nil, time.Time{}, withResponseBody(fmt.Errorf("property %s not found in domain %s for liveness report", prop, domain), resp)
 		}
-		return nil, time.Time{}, err
+		return nil, time.Time{}, withResponseBody(err, resp)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, time.Time{}, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, time.Time{}, fmt.Errorf("unexpected status: %d: %s", resp.StatusCode, responseBody(resp))
 	}
 
 	sortLivenessDataRowsByTimestamp(result.DataRows)

@@ -279,9 +279,12 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 	windowPath := "/gtm-api/v1/reports/traffic/properties-window"
 	windowReq, _ := http.NewRequestWithContext(p.ctx, http.MethodGet, windowPath, nil)
 
-	_, err := p.AkamaiSession.Exec(windowReq, &apiWindow)
+	windowResp, err := p.AkamaiSession.Exec(windowReq, &apiWindow)
+	if windowResp != nil {
+		defer windowResp.Body.Close()
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch property traffic window: %w", err)
+		return nil, withResponseBody(fmt.Errorf("failed to fetch property traffic window: %w", err), windowResp)
 	}
 
 	windowStart, err := time.Parse(time.RFC3339, apiWindow.Start)
@@ -333,15 +336,18 @@ func (p *GTMPropertyTrafficExporter) retrievePropertyTraffic(domain, prop string
 
 	var result PropertyTrafficResponse
 	resp, err := p.AkamaiSession.Exec(req, &result)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("property %s not found in domain %s", prop, domain)
+			return nil, withResponseBody(fmt.Errorf("property %s not found in domain %s", prop, domain), resp)
 		}
-		return nil, err
+		return nil, withResponseBody(err, resp)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d: %s", resp.StatusCode, responseBody(resp))
 	}
 
 	sortPropertyDataRowsByTimestamp(result.DataRows)
