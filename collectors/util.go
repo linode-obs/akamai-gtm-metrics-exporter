@@ -15,6 +15,7 @@ package collectors
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -106,15 +107,37 @@ func GetLivenessErrorsReport(sess session.Session, domainName, propertyName stri
 
 	var result LivenessErrorsResponse
 	resp, err := sess.Exec(req, &result)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
-		return nil, err
+		return nil, withResponseBody(err, resp)
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("akamai API returned error status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("akamai API returned error status: %d: %s", resp.StatusCode, responseBody(resp))
 	}
 
 	return &result, nil
+}
+
+func responseBody(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Sprintf("unable to read response body: %v", err)
+	}
+	return strings.TrimSpace(string(body))
+}
+
+func withResponseBody(err error, resp *http.Response) error {
+	if body := responseBody(resp); body != "" {
+		return fmt.Errorf("%w; API response: %s", err, body)
+	}
+	return err
 }
 
 // --- Utility Functions ---
